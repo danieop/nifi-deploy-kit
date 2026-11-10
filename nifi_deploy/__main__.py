@@ -25,6 +25,7 @@ def main():
     install.add_argument("--bundle", required=True)
     install.add_argument("--env", required=True)
     install.add_argument("--parameters")
+    install.add_argument("--components", help="Optional private JSON array of direct component property overrides")
     install.add_argument("--overwrite-config", action="store_true")
     install.add_argument("--start", action="store_true")
     install.add_argument("--timeout", type=int, default=600)
@@ -42,7 +43,7 @@ def main():
             result = [{"name": (r := validate_bundle(p))["name"], "counts": r["counts"], "valid": True}
                       for p in args.bundles]
         else:
-            result = deploy(args.bundle, args.env, args.parameters, args.overwrite_config, args.start, args.timeout)
+            result = deploy(args.bundle, args.env, args.parameters, args.overwrite_config, args.start, args.timeout, args.components)
             result = {**{k: v for k, v in result.items() if k not in ("invalidProcessors", "typeMismatches")},
                       "invalidProcessorCount": len(result["invalidProcessors"]),
                       "typeMismatchCount": len(result["typeMismatches"])}

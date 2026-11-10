@@ -127,8 +127,44 @@ def apply_parameters(client, values):
             client.poll(f"/parameter-contexts/{api_path(cid)}/update-requests/{api_path(rid)}")
 
 
+def apply_components(client, root_id, overrides):
+    """Apply direct properties, including secrets not parameterized in the source."""
+    for override in overrides:
+        gid = root_id
+        for name in override.get("groups", []):
+            flow = client.get(f"/flow/process-groups/{gid}")["processGroupFlow"]["flow"]
+            matches = [g for g in flow.get("processGroups", []) if g["component"]["name"] == name]
+            if len(matches) != 1:
+                raise ValueError("Component override group path is missing or ambiguous")
+            gid = matches[0]["id"]
+        kind = override.get("kind")
+        if kind == "processor":
+            candidates = client.get(f"/flow/process-groups/{gid}")["processGroupFlow"]["flow"].get("processors", [])
+            resource = "processors"
+        elif kind == "controller-service":
+            candidates = client.get(f"/flow/process-groups/{gid}/controller-services").get("controllerServices", [])
+            candidates = [s for s in candidates if s["component"].get("parentGroupId") == gid]
+            resource = "controller-services"
+        else:
+            raise ValueError("Component override kind must be processor or controller-service")
+        matches = [p for p in candidates if p["component"]["name"] == override["name"]]
+        if len(matches) != 1:
+            raise ValueError("Component override name is missing or ambiguous")
+        entity = client.get(f"/{resource}/{matches[0]['id']}")
+        if entity["component"].get("state") not in ("STOPPED", "DISABLED"):
+            raise ValueError("Stop/disable the target component before overriding its properties")
+        properties = override["properties"]
+        if not properties or any(value is None for value in properties.values()):
+            raise ValueError("Component overrides require non-null property values")
+        properties = {k: str(v) for k, v in properties.items()}
+        change = {"config": {"properties": properties}} if kind == "processor" else {"properties": properties}
+        client.request("PUT", f"/{resource}/{entity['id']}",
+                       {"revision": entity["revision"], "component": {"id": entity["id"], **change}})
+
+
 def verify_live(client, group_id, expected, snapshot=None):
-    counts = {"processors": 0, "controllerServices": 0, "connections": 0, "processGroups": 0}
+    counts = {"processors": 0, "controllerServices": 0, "connections": 0, "processGroups": 0,
+              "inputPorts": 0, "outputPorts": 0}
     invalid = []
     mismatches = []
     running = 0
@@ -136,7 +172,7 @@ def verify_live(client, group_id, expected, snapshot=None):
         nonlocal running
         counts["processGroups"] += 1
         flow = client.get("/flow/process-groups/" + api_path(gid))["processGroupFlow"]["flow"]
-        for key in ("processors", "connections"):
+        for key in ("processors", "connections", "inputPorts", "outputPorts"):
             counts[key] += len(flow.get(key, []))
         for p in flow.get("processors", []):
             comp = p.get("component", {})
@@ -154,18 +190,31 @@ def verify_live(client, group_id, expected, snapshot=None):
                 invalid.append({"id": p["id"], "type": comp.get("type"), "name": comp.get("name")})
         # Endpoint includes ancestor services: count only services owned by this group.
         services = client.get("/flow/process-groups/" + api_path(gid) + "/controller-services").get("controllerServices", [])
-        counts["controllerServices"] += sum(s.get("component", {}).get("parentGroupId") == gid for s in services)
+        owned = [s for s in services if s.get("component", {}).get("parentGroupId") == gid]
+        counts["controllerServices"] += len(owned)
+        for service in owned if source_group else []:
+            comp = service["component"]
+            original = select_source(comp, source_group.get("controllerServices", []))
+            if comp.get("type") != original.get("type") or comp.get("bundle") != original.get("bundle"):
+                mismatches.append({"id": service["id"], "expectedType": original.get("type"), "actualType": comp.get("type")})
         for child in flow.get("processGroups", []):
             expected_child = select_source(child["component"], source_group.get("processGroups", [])) if source_group else None
             visit(child["id"], expected_child)
     visit(group_id, snapshot["flowContents"] if snapshot else None)
+    if snapshot and snapshot.get("parameterContexts"):
+        contexts = snapshot["parameterContexts"]
+        expected_names = {c["name"] for c in (contexts.values() if isinstance(contexts, dict) else contexts)}
+        actual_names = [c.get("component", {}).get("name") for c in client.get("/flow/parameter-contexts").get("parameterContexts", [])]
+        if any(actual_names.count(name) != 1 for name in expected_names):
+            raise ValueError("Imported parameter context is missing or ambiguous")
+        counts["parameterContexts"] = len(expected_names)
     if any(counts[k] != expected.get(k, 0) for k in counts):
         raise RuntimeError("Imported component counts differ from the exported bundle")
     return {"counts": counts, "runningProcessors": running, "invalidProcessors": invalid, "typeMismatches": mismatches,
             "queue": status(client, group_id).get("flowFilesQueued", 0)}
 
 
-def deploy(bundle, env_file, parameters_file=None, overwrite=False, start=False, timeout=600):
+def deploy(bundle, env_file, parameters_file=None, overwrite=False, start=False, timeout=600, component_file=None):
     bundle = Path(bundle).resolve()
     release = validate_bundle(bundle)
     config = load_env(env_file)
@@ -215,7 +264,9 @@ def deploy(bundle, env_file, parameters_file=None, overwrite=False, start=False,
     for folder in ("nginx", "lib", "extensions", "scripts", "data"):
         (target / folder).mkdir(exist_ok=True)
     for artifact in release.get("artifacts", []):
-        shutil.copyfile(bundle / artifact["file"], target / artifact["target"] / Path(artifact["file"]).name)
+        destination = target / artifact["target"] / Path(artifact["file"]).name
+        if not destination.exists() or digest(destination) != artifact["sha256"]:
+            shutil.copyfile(bundle / artifact["file"], destination)
     shutil.copyfile(ROOT / "infrastructure/start-http.sh", target / "start-http.sh")
     (target / "start-http.sh").chmod(0o755)
     shutil.copyfile(ROOT / "infrastructure/nginx.conf", target / "nginx/nifi.conf")
@@ -244,11 +295,11 @@ def deploy(bundle, env_file, parameters_file=None, overwrite=False, start=False,
     if state:
         group_id = state["groupId"]
         client.get("/process-groups/" + api_path(group_id))  # Fail if state points to a removed group.
-        if state.get("flowSha256") != release["flowSha256"]:
+        if overwrite or state.get("flowSha256") != release["flowSha256"]:
             before = status(client, group_id)
-            if before.get("flowFilesQueued", 0) or before.get("activeThreadCount", 0):
-                raise ValueError("Target has queued data/active tasks; drain before replacing the flow")
             current = client.get("/process-groups/" + api_path(group_id))
+            if before.get("flowFilesQueued", 0) or before.get("activeThreadCount", 0) or current.get("runningCount", 0):
+                raise ValueError("Target has queued data/active tasks; drain before replacing the flow")
             write_json(target / "backup-flow.json", client.get(f"/process-groups/{group_id}/download?includeReferencedServices=true&includeComponentState=false"), private=True)
             result = client.request("POST", f"/process-groups/{group_id}/replace-requests",
                                     {"processGroupRevision": current["revision"], "versionedFlowSnapshot": snapshot})
@@ -272,6 +323,8 @@ def deploy(bundle, env_file, parameters_file=None, overwrite=False, start=False,
         write_json(state_path, state, private=True)
     if parameters_file:
         apply_parameters(client, read_json(parameters_file))
+    if component_file:
+        apply_components(client, group_id, read_json(component_file))
     check = verify_live(client, group_id, release["counts"], snapshot)
     if start:
         if check["typeMismatches"]:
@@ -288,7 +341,7 @@ def deploy(bundle, env_file, parameters_file=None, overwrite=False, start=False,
     write_json(state_path, state, private=True)
     report = {"project": project, "bundle": release["name"], "nifiVersion": about["version"],
               "url": f"http://localhost:{port}/nifi/", "groupId": group_id,
-              "flowSha256": release["flowSha256"], "mode": "running" if start else "staged",
+              "flowSha256": release["flowSha256"], "mode": "running" if start or check["runningProcessors"] else "staged",
               "registryHealthy": True if release.get("registryEnabled") else None,
               "configurationComplete": not check["invalidProcessors"] and not check["typeMismatches"], **check}
     write_json(target / "report.json", report, private=True)

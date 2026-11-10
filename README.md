@@ -65,6 +65,15 @@ ${EDITOR:-vi} local/parameters.local.json
   --parameters local/parameters.local.json
 ```
 
+For a direct processor/service property that is not parameterized, use optional
+`--components local/components.local.json`; see
+`examples/components.local.example.json`. `groups` is the relative path of group
+names below the managed application; `[]` selects its root. `kind` is `processor`
+or `controller-service`, and `name` must identify exactly one component in that
+group. Use the exact NiFi API property names. The target component must be stopped
+or disabled. Omitted properties are retained. This also supports direct sensitive
+properties without putting their values into the public bundle.
+
 Omitted parameters retain their existing/exported values. Null overrides are
 rejected. A newly imported sensitive parameter without a value needs a value
 from the customer's secret source; GET/export cannot recover the old secret.
