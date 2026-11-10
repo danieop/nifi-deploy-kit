@@ -54,7 +54,7 @@ tới image registry và backend nghiệp vụ. Không cần SSH tới nguồn �
 ```bash
 git clone https://github.com/danieop/nifi-deploy-kit.git
 cd nifi-deploy-kit
-# Checkout release/commit đã được bàn giao.
+git checkout v0.2.0
 mkdir -p local
 chmod 700 local
 cp -a bundles/node235 local/node235

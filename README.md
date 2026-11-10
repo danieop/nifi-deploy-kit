@@ -29,7 +29,7 @@ queues, checkpoints and Registry history are not copied.
 ```bash
 git clone https://github.com/danieop/nifi-deploy-kit.git
 cd nifi-deploy-kit
-# Checkout the reviewed release/tag supplied by the maintainer.
+git checkout v0.2.0
 mkdir -p local
 chmod 700 local
 cp -a bundles/node235 local/node235

@@ -10,6 +10,21 @@ SSH/sudo/API có thể phát sinh audit log bình thường.
 Bundle mới có đúng hai file JSON cấp cao nhất: `flow.json`, `config.json`; dependency
 thật được copy trong `assets/`. Không cần env/parameter/component file riêng.
 
+## GitHub Actions và artifact bàn giao
+
+- [Export NiFi + Docker CI thành công](https://github.com/danieop/nifi-deploy-kit/actions/runs/42763637712).
+- Artifact `nifi-export-42763637712` được tải xuống máy local, validate checksum và
+  dùng để chuẩn bị config máy đích rồi chạy deploy lại cả hai bundle.
+- So sánh toàn bộ config.json, flow checksum, Docker model và assets metadata:
+  giống hoàn toàn với bundle đã commit trên main ở cả hai nguồn. Export lại không
+  có thay đổi nên CI không tạo nhánh refresh thừa.
+- [Validate của PR triển khai](https://github.com/danieop/nifi-deploy-kit/actions/runs/42763566377)
+  đạt, gồm 29 unit tests; code được merge qua PR #4.
+- Runner ephemeral chỉ nhận một job, tự unregister sau khi thành công. Kiểm tra
+  API GitHub trả runner count 0. Các lần export sau cần runner `nifi-network` online.
+- Credentials API/SSH nằm trong GitHub Actions Secrets, không có trong config
+  public. Payload mở rộng đã được người dùng xác nhận cho phép công khai.
+
 ## Kết quả local
 
 | Nội dung | node235 | node237 |
