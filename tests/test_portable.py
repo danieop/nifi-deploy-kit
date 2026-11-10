@@ -9,7 +9,7 @@ from nifi_deploy.bundle import read_json, write_json, validate_bundle
 from nifi_deploy.configuration import (editable_settings, configured_snapshot, enrich_sensitive_metadata,
     export_deployment, safe_path, unresolved, validate_config)
 from nifi_deploy.docker_export import SECRET, PRIVATE_FILE, portable_docker
-from nifi_deploy.portable_deployment import literal_compose, deploy_config, apply_live_config
+from nifi_deploy.portable_deployment import literal_compose, deploy_config, apply_live_config, resume_saved_stack
 
 
 SNAPSHOT = {
@@ -266,6 +266,48 @@ class PortableTests(unittest.TestCase):
                 client.return_value.get.return_value={'runningCount':0}
                 with self.assertRaisesRegex(ValueError,'Stop and drain'):
                     deploy_config(root/'bundle/config.json',overwrite=True)
+                self.assertEqual(old.read_text(),'keep mounted file')
+                self.assertEqual(docker.call_count,2)
+
+    def test_stopped_managed_stack_resumes_saved_model_without_recreation(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target=Path(temp)
+            saved={'services':{'nifi':{'image':'existing-image'},'nginx':{'image':'nginx'}}}
+            write_json(target/'compose.json',saved)
+            responses=['nifi-id\nnginx-id\n','false','true','']
+            with patch('nifi_deploy.portable_deployment.run',side_effect=responses) as docker:
+                self.assertTrue(resume_saved_stack(target,'owned',['nifi','nginx']))
+                self.assertEqual(docker.call_args_list[-1].args[0][-3:],['up','-d','--no-recreate'])
+                self.assertIn(str(target/'compose.json'),docker.call_args_list[-1].args[0])
+                self.assertEqual(read_json(target/'compose.json'),saved)
+
+    def test_running_managed_stack_is_not_started_again_during_preflight(self):
+        with tempfile.TemporaryDirectory() as temp:
+            target=Path(temp);write_json(target/'compose.json',{'services':{'nifi':{},'nginx':{}}})
+            with patch('nifi_deploy.portable_deployment.run',side_effect=['nifi-id\nnginx-id\n','true','true']) as docker:
+                self.assertFalse(resume_saved_stack(target,'owned',['nifi','nginx']))
+                self.assertEqual(docker.call_count,3)
+
+    def test_resumed_target_still_rejects_queued_data_before_new_config(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)
+            c=export_deployment(FakeExport(),raw_docker(),root/'bundle','test')
+            target=root/'runtime';target.mkdir()
+            c['deployment']['directory']=str(target)
+            c['deployment']['gatewayAuth']['password']='local'
+            c['docker']['compose']['services']['nifi']['environment']['TOKEN']='local'
+            write_json(root/'bundle/config.json',c)
+            write_json(target/'owner.json',{'project':c['deployment']['projectName'],'name':'test'})
+            write_json(target/'deployment.json',{'nifiVersion':'2.12.0','flowSha256':c['flow']['sha256'],'groupId':'group'})
+            old=target/'assets/start.sh';old.parent.mkdir();old.write_text('keep mounted file')
+            with patch('nifi_deploy.portable_deployment.run',return_value='') as docker, \
+                 patch('nifi_deploy.portable_deployment.resume_saved_stack',return_value=True), \
+                 patch('nifi_deploy.portable_deployment.Client') as client, \
+                 patch('nifi_deploy.portable_deployment.status',return_value={'flowFilesQueued':1}):
+                client.return_value.get.return_value={'runningCount':0}
+                with self.assertRaisesRegex(ValueError,'Stop and drain'):
+                    deploy_config(root/'bundle/config.json',overwrite=True)
+                client.return_value.wait_ready.assert_called_once()
                 self.assertEqual(old.read_text(),'keep mounted file')
                 self.assertEqual(docker.call_count,2)
 

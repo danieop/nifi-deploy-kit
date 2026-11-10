@@ -133,6 +133,10 @@ stop/drain ứng dụng rồi chạy:
 ./deploy.sh --config local/customer-a/config.json --overwrite-config
 ```
 
+Nếu container đang stop, script khởi động stack đã lưu rồi kiểm tra flow/queue
+trước khi ghi đè. Nếu flow tự chạy lại hoặc còn queue, script từ chối ghi đè;
+admin phải stop/drain flow. Script không tự xóa dữ liệu hay tự dừng flow đang chạy.
+
 Script kiểm trạng thái trước khi recreate, giữ group ID và lưu native flow backup.
 Thông tin gateway cũ được giữ riêng trong runtime để kiểm tra khi đổi port/auth.
 Giữ `owner.json`, `deployment.json`, `access.json` và named volumes; không xóa
