@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from nifi_deploy.bundle import read_json, write_json
+from nifi_deploy.bundle import read_json, write_json, validate_bundle
 from nifi_deploy.configuration import (editable_settings, configured_snapshot, enrich_sensitive_metadata,
     export_deployment, safe_path, unresolved, validate_config)
 from nifi_deploy.docker_export import SECRET, PRIVATE_FILE, portable_docker
@@ -78,6 +78,31 @@ class PortableTests(unittest.TestCase):
             self.assertEqual(config['docker']['compose']['services']['nifi']['entrypoint'], ['start.sh'])
             validate_config(Path(temp) / 'config.json')
             self.assertFalse((Path(temp) / 'assets/.htpasswd').exists())
+
+    def test_current_bundle_validation_rejects_tampered_flow(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/'bundle'
+            export_deployment(FakeExport(),raw_docker(),root,'test')
+            self.assertEqual(validate_bundle(root)['name'],'test')
+            (root/'flow.json').write_text('{}')
+            with self.assertRaisesRegex(ValueError,'checksum'):validate_bundle(root)
+
+    def test_bundle_asset_path_cannot_escape_export(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root=Path(temp)/'bundle'
+            config=export_deployment(FakeExport(),raw_docker(),root,'test')
+            config['assets'][0]['file']='../outside'
+            write_json(root/'config.json',config)
+            with self.assertRaisesRegex(ValueError,'inside'):validate_bundle(root)
+
+    def test_native_export_uses_get_only_and_omits_component_state(self):
+        client=FakeExport()
+        with tempfile.TemporaryDirectory() as temp, patch.object(client,'get',wraps=client.get) as get:
+            export_deployment(client,raw_docker(),temp,'test')
+            paths=[call.args[0] for call in get.call_args_list]
+            self.assertTrue(any('/download?includeReferencedServices=true&includeComponentState=false' in path for path in paths))
+            self.assertIn('/flow/about',paths)
+            self.assertIn('/controller/registry-clients',paths)
 
     def test_long_bundle_names_produce_distinct_valid_default_project_names(self):
         with tempfile.TemporaryDirectory() as temp:

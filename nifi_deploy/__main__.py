@@ -5,7 +5,6 @@ import sys
 
 from .api import Client
 from .bundle import read_json, validate_bundle
-from .deployment import deploy
 from .configuration import export_deployment
 from .docker_export import capture_docker
 from .portable_deployment import deploy_config
@@ -35,11 +34,7 @@ def main():
     validate = commands.add_parser("validate")
     validate.add_argument("bundles", nargs="+")
     install = commands.add_parser("deploy")
-    install.add_argument("--bundle", help="Legacy schema 1 bundle")
-    install.add_argument("--env", help="Legacy schema 1 local env")
-    install.add_argument("--config", help="Customer-edited schema 2 config.json (primary deployment interface)")
-    install.add_argument("--parameters")
-    install.add_argument("--components", help="Optional private JSON array of direct component property overrides")
+    install.add_argument("--config", required=True, help="Customer-edited config.json")
     install.add_argument("--overwrite-config", action="store_true")
     install.add_argument("--start", action="store_true")
     install.add_argument("--timeout", type=int, default=600)
@@ -61,14 +56,7 @@ def main():
             result = [{"name": (r := validate_bundle(p))["name"], "counts": r["counts"], "valid": True}
                       for p in args.bundles]
         else:
-            if args.config:
-                if any((args.bundle, args.env, args.parameters, args.components)):
-                    raise ValueError("--config contains all settings; do not combine it with legacy file options")
-                result = deploy_config(args.config, args.overwrite_config, args.start, args.timeout)
-            else:
-                if not args.bundle or not args.env:
-                    raise ValueError("Use --config path/to/config.json (or legacy --bundle and --env)")
-                result = deploy(args.bundle, args.env, args.parameters, args.overwrite_config, args.start, args.timeout, args.components)
+            result = deploy_config(args.config, args.overwrite_config, args.start, args.timeout)
             result = {**{k: v for k, v in result.items() if k not in ("invalidProcessors", "typeMismatches")},
                       "invalidProcessorCount": len(result["invalidProcessors"]),
                       "typeMismatchCount": len(result["typeMismatches"])}

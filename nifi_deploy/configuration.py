@@ -85,7 +85,7 @@ def enrich_sensitive_metadata(client, snapshot):
 
 def export_deployment(client, raw_docker, output, name, group_id=None, nifi_service='nifi', gateway_service='nginx'):
     output = Path(output).resolve()
-    if output.exists() and any(output.iterdir()) and not any((output / p).exists() for p in ('config.json', 'release.json')):
+    if output.exists() and any(output.iterdir()) and not (output / 'config.json').exists():
         raise ValueError('Refusing to replace a nonempty unmanaged export directory')
     output.parent.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='.nifi-export-', dir=output.parent) as temp:
@@ -135,9 +135,6 @@ def _export_deployment(client, raw_docker, output, name, group_id=None, nifi_ser
                               'Native sensitive values and sensitive Docker environment/label keys are masked.',
                               'Secrets embedded inside scripts, URLs or ordinary strings require manual review.']}
     write_json(output / 'config.json', config)
-    # Schema 2 replaces the old multi-file metadata, not the packaged native flow.
-    for obsolete in ('release.json', 'parameters.required.json', 'registry-clients.inventory.json'):
-        (output / obsolete).unlink(missing_ok=True)
     return config
 
 
