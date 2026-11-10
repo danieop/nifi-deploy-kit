@@ -110,7 +110,7 @@ def deploy_config(config_file, overwrite=False, start=False, timeout=600):
     missing = unresolved(config)
     blocking = [p for p in missing if p.startswith(('docker/', 'localFiles/'))]
     auth = deployment['gatewayAuth']
-    if not re.fullmatch(r'[A-Za-z0-9_.@-]+', auth['username']) or not auth.get('password') or auth['password'] == SECRET:
+    if not re.fullmatch(r'[A-Za-z0-9_.@-]+', auth['username']) or not auth.get('password') or auth['password'] == SECRET or any(c in auth['password'] for c in '\r\n'):
         raise ValueError('Set deployment.gatewayAuth username/password in the local config.json')
     if blocking or (start and missing):
         raise ValueError('Replace required placeholders in config.json: ' + ', '.join(blocking or missing))

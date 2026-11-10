@@ -42,7 +42,10 @@ def capture_docker(host, compose_file, project='', port=22, identity=None, known
             env.update(SSH_ASKPASS=str(helper), SSH_ASKPASS_REQUIRE='force', DISPLAY='nifi-export')
         elif host:
             args[1:1] = ['-o', 'BatchMode=yes']
-        result = subprocess.run(args, input=payload, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+        try:
+            result = subprocess.run(args, input=payload, env=env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+        except subprocess.TimeoutExpired:
+            raise RuntimeError('Read-only Docker source capture timed out') from None
     if result.returncode:
         raise RuntimeError('Docker source capture failed; check SSH trust/auth, Compose file and Docker read permissions')
     return json.loads(result.stdout)

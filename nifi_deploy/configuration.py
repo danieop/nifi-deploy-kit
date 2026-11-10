@@ -43,15 +43,15 @@ def editable_settings(snapshot):
                     descriptor = descriptors.get(name, {})
                     if descriptor.get('identifiesControllerService') or (isinstance(value, str) and value in service_ids):
                         continue  # NiFi remaps service IDs during native import.
+                    if descriptor.get('sensitive'):
+                        sensitive.append(name)
                     if descriptor.get('sensitive') and value is not None and '#{' not in str(value):
                         properties[name] = SECRET
-                        sensitive.append(name)
                         component['properties'][name] = None
                     elif value is not None:
                         properties[name] = value
                     elif descriptor.get('sensitive'):
                         properties[name] = None
-                        sensitive.append(name)
                 if properties:
                     components.append({'sourceId': component_key(component), 'groups': path,
                                        'kind': kind, 'name': component.get('name'),

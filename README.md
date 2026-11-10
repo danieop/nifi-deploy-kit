@@ -153,6 +153,7 @@ add destination storage if persistence is required.
 
 [Hướng dẫn admin tiếng Việt](docs/admin-vi.md) ·
 [Config reference](docs/config-reference.md) ·
+[Schema 2 test report](docs/test-report-schema2-2026-11-10.md) ·
 [Legacy v0.1 interface](docs/legacy-v1.md)
 
 ```bash

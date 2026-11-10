@@ -43,7 +43,9 @@
         "Username": "#{app-scrapcommand-username}",
         "Virtual Host": "facebook-crawl"
       },
-      "sensitiveProperties": [],
+      "sensitiveProperties": [
+        "Password"
+      ],
       "sourceId": "631aa524-7e74-3272-261f-8164bddaef92"
     },
     {
@@ -5158,7 +5160,9 @@
         "Username": "#{app-scrapcommand-username}",
         "Virtual Host": "facebook-crawl"
       },
-      "sensitiveProperties": [],
+      "sensitiveProperties": [
+        "Password"
+      ],
       "sourceId": "ff77133e-cf2b-3422-cc6b-5e4570de5f50"
     },
     {
@@ -7466,7 +7470,9 @@
         "Username": "app-scrapcommand",
         "Virtual Host": "facebook-crawl"
       },
-      "sensitiveProperties": [],
+      "sensitiveProperties": [
+        "Password"
+      ],
       "sourceId": "4cfe8be1-7800-3f92-4181-2fe9129895c0"
     },
     {
@@ -7923,7 +7929,9 @@
         "Username": "#{app-scrapcommand-username}",
         "Virtual Host": "facebook-crawl"
       },
-      "sensitiveProperties": [],
+      "sensitiveProperties": [
+        "Password"
+      ],
       "sourceId": "5f3371ef-6ecc-385a-342b-454d0aff12da"
     },
     {
@@ -7997,7 +8005,9 @@
         "Username": "#{app-scrapcommand-username}",
         "Virtual Host": "news-crawl"
       },
-      "sensitiveProperties": [],
+      "sensitiveProperties": [
+        "Password"
+      ],
       "sourceId": "eb2c6f14-9673-3fa0-7a13-36a3327e7fad"
     },
     {
@@ -16357,7 +16367,9 @@
         "Username": "#{app-scrapcommand-username}",
         "Virtual Host": "facebook-crawl"
       },
-      "sensitiveProperties": [],
+      "sensitiveProperties": [
+        "Password"
+      ],
       "sourceId": "2e47dc00-dd2b-3b0f-d881-bc188e879f1f"
     },
     {
@@ -16439,7 +16451,9 @@
         "Username": "app-scrapcommand",
         "Virtual Host": "facebook-crawl"
       },
-      "sensitiveProperties": [],
+      "sensitiveProperties": [
+        "Password"
+      ],
       "sourceId": "602e5f29-d597-34ac-4f89-44f4bbfd1963"
     },
     {
@@ -16534,6 +16548,7 @@
         "PROXY BASE URL": "__REQUIRED_SECRET__"
       },
       "sensitiveProperties": [
+        "ACCESS_TOKEN",
         "CURL",
         "PROXY BASE URL"
       ],
@@ -17666,7 +17681,9 @@
         "Username": "#{app-scrapcommand-username}",
         "Virtual Host": "facebook-crawl"
       },
-      "sensitiveProperties": [],
+      "sensitiveProperties": [
+        "Password"
+      ],
       "sourceId": "7a0a105b-44d3-359f-b5cf-7d9b00125d1b"
     },
     {
@@ -19936,7 +19953,9 @@
         "Username": "#{app-scrapcommand-username}",
         "Virtual Host": "facebook-crawl"
       },
-      "sensitiveProperties": [],
+      "sensitiveProperties": [
+        "Password"
+      ],
       "sourceId": "bf93a33c-2d28-3b36-3d91-aae37713a286"
     },
     {
@@ -19964,7 +19983,9 @@
         "Username": "app-scrapcommand",
         "Virtual Host": "facebook-crawl"
       },
-      "sensitiveProperties": [],
+      "sensitiveProperties": [
+        "Password"
+      ],
       "sourceId": "0e7d61e5-819c-3bac-03d3-636009131800"
     },
     {
