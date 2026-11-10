@@ -146941,7 +146941,10 @@
                                   "x": 176.0,
                                   "y": -256.0
                                 },
-                                "properties": {},
+                                "properties": {
+                                  "CURL": null,
+                                  "PROXY BASE URL": null
+                                },
                                 "propertyDescriptors": {
                                   "CURL": {
                                     "displayName": "CURL",
@@ -146996,7 +146999,9 @@
                                   "y": 64.0
                                 },
                                 "properties": {
-                                  "ACCESS_TOKEN": "#{access_token}"
+                                  "ACCESS_TOKEN": "#{access_token}",
+                                  "CURL": null,
+                                  "PROXY BASE URL": null
                                 },
                                 "propertyDescriptors": {
                                   "ACCESS_TOKEN": {
@@ -148454,7 +148459,10 @@
                                   "x": 2824.0,
                                   "y": -88.0
                                 },
-                                "properties": {},
+                                "properties": {
+                                  "CURL": null,
+                                  "PROXY BASE URL": null
+                                },
                                 "propertyDescriptors": {
                                   "CURL": {
                                     "displayName": "CURL",

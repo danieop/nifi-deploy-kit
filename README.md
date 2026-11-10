@@ -1,178 +1,165 @@
 # NiFi Deploy Kit
 
-Export native Apache NiFi flow definitions with GitHub Actions and deploy a
-standalone NiFi instance on one Docker Compose host. Python 3.10+ standard library;
-no pip dependencies. Tested baseline: NiFi **2.12.0**, Nginx **1.27-alpine**.
+Export a running **Docker Compose + NiFi** deployment, then deploy it on another
+single Docker host by editing **one `config.json`**. Native NiFi flow JSON stays
+separate. Python 3.10+ standard library, Docker Compose and OpenSSH; no pip packages.
+Tested baseline: NiFi 2.12.0, HTTP NiFi behind Nginx Basic Auth.
 
-## Workflow
+```text
+Source host (read-only)
+  NiFi GET API + SSH Docker/Compose inspection + bind-mounted files
+                 ↓ GitHub Actions
+bundles/node235/
+  flow.json       native flow, referenced services and reachable parameter contexts
+  config.json     captured Docker model + deployment + editable NiFi properties
+  assets/         required mounted files, NARs/JARs, startup scripts, Nginx config
+                 ↓ download/copy, edit config.json
+Destination host: ./deploy.sh --config local/node235/config.json
+```
 
-1. `export.sh` reads a running source through GET requests only. It exports the
-   selected group (root by default), referenced services, reachable parameter
-   contexts, bundle dependencies and Registry Client inventory.
-2. GitHub Actions exports both configured sources, validates bundles, uploads a
-   downloadable artifact and optionally pushes a feature branch when data changes.
-3. A maintainer opens/merges the PR. Nothing pushes directly to `main`.
-4. The customer clones a reviewed commit/tag, creates local configuration and
-   runs `deploy.sh`. Compose starts NiFi/Nginx (and optional Registry); the NiFi
-   API imports the application and applies local parameter overrides.
+The Docker model comes from the **source**, not a fixed Compose template. The
+exporter reads resolved Compose and running-container launch settings. Image
+digests, entrypoint/command, declared/custom environment, ports, restart policy,
+resource limits and mounts are retained. Source host bind paths are relocated;
+source volumes become fresh project-owned named volumes. Source volume data,
+queues, checkpoints and Registry history are not copied.
 
-Imports are **staged stopped by default**. Original DISABLED processors stay
-disabled. Export never stops or reconfigures the source. No extra scanning of
-scripts, URLs, comments or non-sensitive values is performed. Only native
-sensitive parameter values are omitted. Public flow definitions may contain
-non-sensitive source environment values, as requested for this project.
-
-## Customer quick start
-
-Prerequisites: Linux, Python 3.10+, Docker Engine or Docker Desktop and Docker
-Compose, Docker permission for the current user, available ports/storage/RAM,
-access to image registries and application dependencies.
+## Deploy on a customer host
 
 ```bash
 git clone https://github.com/danieop/nifi-deploy-kit.git
 cd nifi-deploy-kit
-# Select a reviewed release/tag/commit before deploying.
-mkdir -m 700 local
-cp examples/deploy.env.example local/deploy.env
-chmod 600 local/deploy.env
-# Edit project, absolute deployment directory, port, account and memory.
-${EDITOR:-vi} local/deploy.env
-
-./deploy.sh --bundle bundles/node235 --env local/deploy.env
+# Checkout the reviewed release/tag supplied by the maintainer.
+mkdir -p local
+chmod 700 local
+cp -a bundles/node235 local/node235
+chmod 600 local/node235/config.json
+${EDITOR:-vi} local/node235/config.json
+./deploy.sh --config local/node235/config.json
 ```
 
-Select `bundles/node237` for the no-Registry profile. `node235` also starts a
-Registry container with persistent named storage. Each bundle imports one
-managed application group containing its exported hierarchy. A destination root
-group remains outside that application group.
+Edit these sections in **that copied file**:
 
-The command prints the local UI URL and writes `report.json`, `owner.json` and
-`deployment.json` into `DEPLOY_DIRECTORY`. All actual NiFi configuration, key,
-state and repositories persist in project-specific **named Docker volumes**.
-Only Nginx is published, on loopback by default. Set `BIND_ADDRESS=0.0.0.0` when
-the customer intentionally needs access through the host network interface.
+| Section | What the admin changes |
+|---|---|
+| `deployment.projectName` | Unique Compose project for this instance |
+| `deployment.directory` | Writable runtime directory; relative to `config.json`, or absolute |
+| `deployment.apiUrl` | Local gateway URL; port must match the gateway's published port |
+| `deployment.gatewayAuth.username/password` | New destination UI/API Basic Auth credentials |
+| `docker.compose.services` | Source Docker settings: host ports/bind IPs, heap, resources, mounts, environment |
+| `parameters` | NiFi Parameter Context values: destination hosts, URLs, accounts, secrets |
+| `components[].properties` | Processor/service properties, including endpoints not parameterized in NiFi |
+| `localFiles` | Paths to customer-local certificate/key files if the source required them |
 
-## Parameters and activation
+**Review source heap and published ports before deploy.** The supplied sources
+use a 16 GiB maximum heap. The export preserves it; select an appropriate value
+for the customer's RAM. Source ports/bind addresses are also preserved, including
+the optional Registry's published port. To keep UI local, set gateway port
+`host_ip` to `127.0.0.1`.
 
-Consult `bundles/<name>/parameters.required.json` for exported context/parameter
-names and sensitivity. Supply only the values that must change in a local JSON:
+`__REQUIRED_SECRET__` is an editable placeholder, never a recovered password.
+Native sensitive parameter/property values and sensitive Docker env/label keys
+are masked. Optional unset sensitive properties are `null`. Parameter references
+such as `#{Password}` remain references. Source `.htpasswd` is not copied: the
+script generates a new one from `deployment.gatewayAuth`.
+
+Gateway/Docker/local-file placeholders must be replaced before creating
+containers. NiFi placeholders can remain for a **staged** import; they are not
+sent to NiFi. The report lists their paths. All remaining placeholders block
+`--start`. Secrets inside ordinary script/URL/text fields cannot be reliably
+classified by NiFi metadata; review them before publishing. The exporter does
+not claim to scrub arbitrary application code or binary content.
+
+The default import is staged stopped. Check the UI and the runtime `report.json`,
+correct endpoints/credentials and validation, then:
 
 ```bash
-cp examples/parameters.local.example.json local/parameters.local.json
-chmod 600 local/parameters.local.json
-${EDITOR:-vi} local/parameters.local.json
-./deploy.sh --bundle bundles/node235 --env local/deploy.env \
-  --parameters local/parameters.local.json
+./deploy.sh --config local/node235/config.json --start
 ```
 
-For a direct processor/service property that is not parameterized, use optional
-`--components local/components.local.json`; see
-`examples/components.local.example.json`. `groups` is the relative path of group
-names below the managed application; `[]` selects its root. `kind` is `processor`
-or `controller-service`, and `name` must identify exactly one component in that
-group. Use the exact NiFi API property names. The target component must be stopped
-or disabled. Omitted properties are retained. This also supports direct sensitive
-properties without putting their values into the public bundle.
+Controller-service references and component wiring remain native. The script
+maps original component IDs to imported IDs when applying later changes. Names
+are descriptive; keep `sourceId` and other exported identifiers unchanged.
 
-Omitted parameters retain their existing/exported values. Null overrides are
-rejected. A newly imported sensitive parameter without a value needs a value
-from the customer's secret source; GET/export cannot recover the old secret.
-An infrastructure/import success is **not** proof of business readiness: inspect
-`configurationComplete` and `invalidProcessors` in the report.
+## Export manually
+
+Source prerequisites: API GET access, SSH, Python 3, Docker Compose, trusted SSH
+host keys, Docker read permission (or `--docker-sudo`). No source file is written,
+no container is exec'd/restarted and no NiFi configuration is changed. Normal
+SSH/sudo/API audit logs may still be generated.
 
 ```bash
-# Only after checking endpoints, secrets, dependencies and application behavior:
-./deploy.sh --bundle bundles/node235 --env local/deploy.env \
-  --parameters local/parameters.local.json --start
+# Private API credentials: {"username":"...","password":"..."}
+./export.sh --url http://SOURCE:9080/nifi --name customer-app \
+  --auth-file local/source-auth.json \
+  --docker-host ubuntu@SOURCE \
+  --compose-file /home/ubuntu/nifi/compose.yml \
+  --compose-project nifi --ssh-known-hosts sources/known_hosts \
+  --output bundles/customer-app
 ```
 
-No production queue is purged and no source processor is started by these tests.
-
-## Redeployment
-
-Run the same command to reuse volumes and the recorded group ID. The same flow
-checksum is not imported twice. Changing the flow requires `--overwrite-config`;
-the target group must have no queued FlowFiles or active tasks. The current flow
-definition is saved locally before replacement. Keep NiFi on the same version;
-upgrades and migration of source queue/checkpoints are separate operations.
-
-An existing unrelated Compose project or an unowned nonempty deployment
-directory is rejected. This kit does not automatically adopt the anonymous
-volumes on the two original VMs. Do not use `docker compose down -v` on a customer
-deployment unless intentionally destroying its data.
+Use SSH agent/default keys or `--ssh-identity`. Password authentication can use
+`NIFI_SOURCE_SSH_PASSWORD` from a private environment. `--docker-sudo` uses
+`sudo -n` when passwordless, otherwise `NIFI_SOURCE_SUDO_PASSWORD` (falls back to
+the SSH password), sent over stdin. Never put passwords in command arguments.
+For same-host export, replace `--docker-host` with `--docker-local`.
 
 ## GitHub Actions
 
-`Validate` runs on GitHub-hosted runners for pushes/PRs. `Export NiFi` is manual
-(`workflow_dispatch`), uses only default-branch code and needs a trusted runner
-with labels `self-hosted, linux, x64, nifi-network` that can reach the private
-source network. Fork/PR jobs never run on this network runner.
-
-Repository Secrets:
-
-- `NIFI_SOURCE_USERNAME`: source Nginx Basic Auth user.
-- `NIFI_SOURCE_PASSWORD`: source Nginx Basic Auth password.
-
-Repository Variables:
-
-- `SOURCE_235_URL`: source URL ending in `/nifi` or `/nifi-api`.
-- `SOURCE_237_URL`: the other source URL.
+- **Validate:** unit tests, checksums, native flow counts, shell and Compose checks.
+- **Export NiFi:** manual, trusted default-branch code only, trusted self-hosted
+  runner labelled `self-hosted, linux, x64, nifi-network` with source network access.
+  Reads `sources/hosts.json` and verified `sources/known_hosts`.
+- Secrets: `NIFI_SOURCE_USERNAME`, `NIFI_SOURCE_PASSWORD`; optional
+  `NIFI_SOURCE_SSH_KEY`, or `NIFI_SOURCE_235_SSH_PASSWORD` and
+  `NIFI_SOURCE_237_SSH_PASSWORD`. These source users use Docker through sudo.
+- Optional URL overrides: repository variables `SOURCE_235_URL`, `SOURCE_237_URL`.
+- Exports both bundles, validates, uploads `nifi-export-RUN_ID`, optionally pushes
+  an export branch. A maintainer opens/merges its PR; no direct pushes to main and
+  no changes to repository approval settings.
 
 ```bash
 gh workflow run export.yml -f source=both -f publish=true
-gh run list --workflow export.yml
 gh run download RUN_ID -n nifi-export-RUN_ID -D local/downloaded
+# Edit local/downloaded/node235/config.json before deploying.
+./deploy.sh --config local/downloaded/node235/config.json
 ```
 
-The workflow never changes repository approval settings. If it pushes an export
-branch, open its printed compare URL or use `gh pr create --base main --head
-BRANCH`. A trusted maintainer merges after validation. Downloaded bundles are
-checksum-validated by the same deploy command:
+Source credentials and edited customer config must stay outside Git. `local/` is
+ignored. A network runner must be online for each export; the test runner was
+ephemeral, not a permanently installed service.
 
-```bash
-./deploy.sh --bundle local/downloaded/node235 --env local/deploy.env
-```
+## Redeploy and scope
 
-## Manual export
+Same config: reuse the recorded group and volumes. Changed NiFi property/parameter
+values are applied to stopped/disabled components; unchanged values are skipped.
+A different flow or Docker model requires `--overwrite-config` and a stopped,
+drained target. The old native flow is backed up locally before replacement.
+Do not delete volumes or the runtime deployment state to retry a failure.
 
-```bash
-cp examples/source-auth.example.json local/source-auth.json
-chmod 600 local/source-auth.json
-${EDITOR:-vi} local/source-auth.json
-./export.sh --url http://SOURCE:9080/nifi --name customer-app \
-  --output bundles/customer-app --auth-file local/source-auth.json
-python3 -m nifi_deploy validate bundles/customer-app
-```
+This is a new deployment, not a disk clone. Registry Clients are inventory only;
+client tokens, external systems, Reporting Tasks, Parameter Providers, Flow
+Analysis Rules and arbitrary host-level NiFi settings are not replayed. The
+baseline requires Compose services running once each, a NiFi service and an
+HTTP Basic Auth Nginx gateway with a `.htpasswd` bind. Docker Swarm/Kubernetes,
+TLS/LDAP/OIDC, external Docker networks, Compose secrets/config objects and image
+upgrades are outside this tested path. Unsupported models fail explicitly.
 
-For CI, credentials are read from environment variables instead. The source URLs
-and credentials need not be placed in committed manifests. Export is not a
-transactional backup while users are editing the source; export during a period
-without configuration edits and validate the result.
+Private key/certificate files are represented by `localFiles` placeholders,
+not published. Bind-mounted application data is initialized empty. Bind assets
+are capped at 64 MiB/file and 128 MiB/package; symlinks require explicit packaging.
+Registry storage without source mounts remains ephemeral, matching that source;
+add destination storage if persistence is required.
 
-## Scope and optional configuration
-
-Required: exported native snapshot, fixed image versions, required binaries,
-project/directory, available port, Nginx credentials, and parameters required by
-processors the admin intends to enable. Heap/port have defaults.
-
-Optional: Registry, external provider integrations, TLS, custom storage layout,
-and automatic activation. Registry Client output is inventory, **not an automatic
-recreation of GitLab clients/tokens**. Reporting Tasks, Parameter Providers and
-Flow Analysis Rules are not currently replayed (none were configured in the
-inspected source application). Initial host-level settings are the Compose
-baseline, not an arbitrary clone of every `nifi.properties` setting.
-
-The source applications use external RabbitMQ/Elasticsearch/Kafka/GitLab systems.
-The kit does not provision those systems or migrate their data. Admins must
-configure the corresponding reachable addresses/accounts on the destination.
-
-## Development
+[Hướng dẫn admin tiếng Việt](docs/admin-vi.md) ·
+[Config reference](docs/config-reference.md) ·
+[Schema 2 test report](docs/test-report-schema2-2026-11-10.md) ·
+[Legacy v0.1 interface](docs/legacy-v1.md)
 
 ```bash
 python3 -m unittest discover -s tests -v
 python3 -m nifi_deploy validate bundles/node235 bundles/node237
 ```
 
-See [Vietnamese admin guide](docs/admin-vi.md) and the repository `docs/` for
-the actual end-to-end test report. Tooling is MIT licensed; third-party binaries
-and exported application content retain their respective ownership/licenses.
+Tooling is MIT licensed; exported application content and third-party assets
+retain their respective ownership/licenses.
