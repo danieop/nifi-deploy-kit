@@ -42,6 +42,64 @@ def status(client, group_id):
     return client.get(f"/flow/process-groups/{api_path(group_id)}/status")["processGroupStatus"]["aggregateSnapshot"]
 
 
+def import_payload(snapshot):
+    # /process-groups/import consumes ProcessGroupUploadEntity, unlike replace.
+    return {"flowSnapshot": snapshot, "groupName": snapshot["flowContents"]["name"],
+            "revisionDTO": {"version": 0}, "positionDTO": {"x": 0, "y": 0}}
+
+
+def select_source(actual, candidates):
+    by_id = [p for p in candidates if p.get("identifier") == actual.get("versionedComponentId")]
+    if len(by_id) == 1:
+        return by_id[0]
+    by_name = [p for p in candidates if p.get("name") == actual.get("name")]
+    by_position = [p for p in by_name if p.get("position", {}) == actual.get("position", {})]
+    matches = by_position if by_position else by_name
+    if len(matches) != 1:
+        raise ValueError("Cannot uniquely map imported component to its source definition")
+    return matches[0]
+
+
+def enable_referenced_services(client, group_id):
+    """Enable only services reachable from non-disabled processors, dependencies first."""
+    services, processors = {}, []
+    def visit(gid):
+        flow = client.get(f"/flow/process-groups/{gid}")["processGroupFlow"]["flow"]
+        processors.extend(p["component"] for p in flow.get("processors", [])
+                          if p.get("component", {}).get("state") != "DISABLED")
+        entities = client.get(f"/flow/process-groups/{gid}/controller-services").get("controllerServices", [])
+        services.update({s["id"]: s for s in entities})
+        for g in flow.get("processGroups", []):
+            visit(g["id"])
+    visit(group_id)
+    done, visiting = set(), set()
+    def references(component):
+        return [v for v in (component.get("properties") or component.get("config", {}).get("properties") or {}).values()
+                if isinstance(v, str) and v in services]
+    def enable(sid):
+        if sid in done:
+            return
+        if sid in visiting:
+            raise ValueError("Controller service dependency cycle")
+        visiting.add(sid)
+        for dependency in references(services[sid]["component"]):
+            enable(dependency)
+        entity = client.get("/controller-services/" + api_path(sid))
+        if entity["component"].get("state") != "ENABLED":
+            client.request("PUT", f"/controller-services/{sid}/run-status",
+                           {"revision": entity["revision"], "state": "ENABLED"})
+            deadline = time.monotonic() + 120
+            while client.get("/controller-services/" + sid)["component"].get("state") != "ENABLED":
+                if time.monotonic() >= deadline:
+                    raise ApiError("Controller service did not enable; inspect target configuration")
+                time.sleep(1)
+        visiting.remove(sid)
+        done.add(sid)
+    for processor in processors:
+        for sid in references(processor):
+            enable(sid)
+
+
 def apply_parameters(client, values):
     known = {}
     for entity in client.get("/flow/parameter-contexts").get("parameterContexts", []):
@@ -69,11 +127,12 @@ def apply_parameters(client, values):
             client.poll(f"/parameter-contexts/{api_path(cid)}/update-requests/{api_path(rid)}")
 
 
-def verify_live(client, group_id, expected):
+def verify_live(client, group_id, expected, snapshot=None):
     counts = {"processors": 0, "controllerServices": 0, "connections": 0, "processGroups": 0}
     invalid = []
+    mismatches = []
     running = 0
-    def visit(gid):
+    def visit(gid, source_group=None):
         nonlocal running
         counts["processGroups"] += 1
         flow = client.get("/flow/process-groups/" + api_path(gid))["processGroupFlow"]["flow"]
@@ -81,6 +140,15 @@ def verify_live(client, group_id, expected):
             counts[key] += len(flow.get(key, []))
         for p in flow.get("processors", []):
             comp = p.get("component", {})
+            source = select_source(comp, source_group.get("processors", [])) if source_group else None
+            if source:
+                if source.get("scheduledState") == "DISABLED" and comp.get("state") != "DISABLED":
+                    client.request("PUT", f"/processors/{p['id']}/run-status",
+                                   {"revision": p["revision"], "state": "DISABLED"})
+                    comp["state"] = "DISABLED"
+                if comp.get("type") != source.get("type") or comp.get("bundle") != source.get("bundle"):
+                    mismatches.append({"id": p["id"], "expectedType": source.get("type"),
+                                       "actualType": comp.get("type"), "expectedDisabled": source.get("scheduledState") == "DISABLED"})
             running += comp.get("state") == "RUNNING"
             if comp.get("validationStatus") == "INVALID" and comp.get("state") != "DISABLED":
                 invalid.append({"id": p["id"], "type": comp.get("type"), "name": comp.get("name")})
@@ -88,11 +156,12 @@ def verify_live(client, group_id, expected):
         services = client.get("/flow/process-groups/" + api_path(gid) + "/controller-services").get("controllerServices", [])
         counts["controllerServices"] += sum(s.get("component", {}).get("parentGroupId") == gid for s in services)
         for child in flow.get("processGroups", []):
-            visit(child["id"])
-    visit(group_id)
+            expected_child = select_source(child["component"], source_group.get("processGroups", [])) if source_group else None
+            visit(child["id"], expected_child)
+    visit(group_id, snapshot["flowContents"] if snapshot else None)
     if any(counts[k] != expected.get(k, 0) for k in counts):
         raise RuntimeError("Imported component counts differ from the exported bundle")
-    return {"counts": counts, "runningProcessors": running, "invalidProcessors": invalid,
+    return {"counts": counts, "runningProcessors": running, "invalidProcessors": invalid, "typeMismatches": mismatches,
             "queue": status(client, group_id).get("flowFilesQueued", 0)}
 
 
@@ -159,6 +228,16 @@ def deploy(bundle, env_file, parameters_file=None, overwrite=False, start=False,
     about = client.wait_ready(timeout)
     if about.get("version") != release["nifiVersion"]:
         raise ValueError("Running NiFi version does not match the bundle")
+    if release.get("registryEnabled"):
+        registry_id = run(compose + ["ps", "-q", "registry"], env=env).strip()
+        deadline = time.monotonic() + 180
+        while True:
+            health = json.loads(run(["docker", "inspect", "--format", "{{json .State.Health}}", registry_id]))
+            if health and health.get("Status") == "healthy":
+                break
+            if time.monotonic() >= deadline:
+                raise RuntimeError("Registry API did not become healthy; inspect its local logs")
+            time.sleep(3)
     root_id = client.root_id()
     snapshot = read_json(bundle / release["flowFile"])
     snapshot["flowContents"]["name"] = "nifi-deploy-kit-" + release["name"]
@@ -185,8 +264,7 @@ def deploy(bundle, env_file, parameters_file=None, overwrite=False, start=False,
             group_id = matches[0]["id"]
         else:
             current = client.get("/process-groups/" + api_path(root_id))
-            result = client.request("POST", f"/process-groups/{root_id}/process-groups/import",
-                                    {"processGroupRevision": current["revision"], "versionedFlowSnapshot": snapshot})
+            result = client.request("POST", f"/process-groups/{root_id}/process-groups/import", import_payload(snapshot))
             group_id = result["id"]
         # Record ID immediately: a later failed parameter application must not duplicate the import.
         state = {"project": project, "name": release["name"], "nifiVersion": release["nifiVersion"],
@@ -194,14 +272,12 @@ def deploy(bundle, env_file, parameters_file=None, overwrite=False, start=False,
         write_json(state_path, state, private=True)
     if parameters_file:
         apply_parameters(client, read_json(parameters_file))
-    check = verify_live(client, group_id, release["counts"])
+    check = verify_live(client, group_id, release["counts"], snapshot)
     if start:
-        services = client.get(f"/flow/process-groups/{group_id}/controller-services").get("controllerServices", [])
-        if services:
-            client.request("PUT", f"/flow/process-groups/{group_id}/controller-services",
-                           {"id": group_id, "state": "ENABLED"})
-            time.sleep(3)
-        check = verify_live(client, group_id, release["counts"])
+        if check["typeMismatches"]:
+            raise ValueError("Imported component type/bundle differs from source; inspect target dependency/migration before --start")
+        enable_referenced_services(client, group_id)
+        check = verify_live(client, group_id, release["counts"], snapshot)
         if check["invalidProcessors"]:
             raise ValueError("Flow has invalid processors; supply missing parameters/dependencies before --start")
         client.request("PUT", f"/flow/process-groups/{group_id}", {"id": group_id, "state": "RUNNING"})
@@ -213,6 +289,7 @@ def deploy(bundle, env_file, parameters_file=None, overwrite=False, start=False,
     report = {"project": project, "bundle": release["name"], "nifiVersion": about["version"],
               "url": f"http://localhost:{port}/nifi/", "groupId": group_id,
               "flowSha256": release["flowSha256"], "mode": "running" if start else "staged",
-              "configurationComplete": not check["invalidProcessors"], **check}
+              "registryHealthy": True if release.get("registryEnabled") else None,
+              "configurationComplete": not check["invalidProcessors"] and not check["typeMismatches"], **check}
     write_json(target / "report.json", report, private=True)
     return report

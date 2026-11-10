@@ -57,13 +57,13 @@ def prepare_snapshot(snapshot):
     data = copy.deepcopy(snapshot)
     for group in groups(data["flowContents"]):
         group.pop("componentStates", None)
-        group["scheduledState"] = "STOPPED"
+        group["scheduledState"] = "ENABLED"
         for p in group.get("processors", []):
             if p.get("scheduledState") != "DISABLED":
                 p["scheduledState"] = "ENABLED"
         for p in group.get("inputPorts", []) + group.get("outputPorts", []):
             if p.get("scheduledState") != "DISABLED":
-                p["scheduledState"] = "STOPPED"
+                p["scheduledState"] = "ENABLED"
         for service in group.get("controllerServices", []):
             service["scheduledState"] = "DISABLED"
     contexts = data.get("parameterContexts", {})
@@ -123,6 +123,12 @@ def validate_bundle(path):
     snapshot = read_json(flow)
     if "flowContents" not in snapshot or "rootGroup" in snapshot:
         raise ValueError("Expected native exported flow definition, not persisted flow.json.gz")
+    for group in groups(snapshot["flowContents"]):
+        components = [group]
+        for key in ("processors", "controllerServices", "inputPorts", "outputPorts"):
+            components += group.get(key, [])
+        if any(c.get("scheduledState", "ENABLED") not in ("ENABLED", "DISABLED") for c in components):
+            raise ValueError("Native snapshot scheduledState must be ENABLED/DISABLED, not REST run-state STOPPED")
     for artifact in release.get("artifacts", []):
         p = (path / artifact["file"]).resolve()
         if not p.is_relative_to(path) or artifact["target"] not in ("lib", "extensions", "scripts"):
