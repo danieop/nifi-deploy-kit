@@ -80,7 +80,8 @@ Actions → **Export NiFi** → **Run workflow**, branch **main**.
 | `runner_label` | `nifi-network`; label của trusted self-hosted Linux/x64 runner tới được mạng nguồn |
 | `publish` | `false`; bật để đẩy thêm nhánh cập nhật repo cho maintainer review |
 
-Tên bundle độc lập với hostname/IP. Dùng lại cùng tên để cập nhật cùng bundle;
+URL API và SSH host phải thuộc cùng deployment nguồn; có thể dùng domain cho API
+và IP cho SSH. Tên bundle độc lập với hostname/IP. Dùng lại cùng tên để cập nhật cùng bundle;
 đặt tên mới nếu muốn giữ thành bundle riêng. Giữ credential trong profile riêng
 khi thay nguồn. Không dùng dấu gạch chéo/`..` trong bundle_name.
 
@@ -145,6 +146,7 @@ dung được phép chia sẻ lên repo này, hoặc dùng một repo private ph
 
 ## 5. Ghi chú nâng từ v0.2
 
+Không còn input `source=both`: muốn export hai nguồn thì chạy hai lần.
 Không còn đọc `sources/hosts.json`, `sources/known_hosts`, variables SOURCE_235_URL /
 SOURCE_237_URL hoặc các Secret NIFI_SOURCE_* của workflow cũ. Những Secret cũ
 không bị tự xóa; có thể giữ cho công cụ khác, nhưng không điều khiển workflow mới.
