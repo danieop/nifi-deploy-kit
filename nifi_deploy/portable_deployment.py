@@ -99,6 +99,27 @@ def materialize(config, root, target):
     return compose
 
 
+def resume_saved_stack(target, project, services):
+    """Start only the saved managed stack before checking an overwrite target.
+
+    Never materialize the incoming config or recreate existing containers here.
+    The caller still checks running components, active tasks and queued data.
+    """
+    path = target / 'compose.json'
+    if not path.is_file():
+        return False
+    saved = read_json(path)
+    if any(name not in saved['services'] for name in services):
+        raise ValueError('Restore the managed service names before redeploying')
+    cli = ['docker', 'compose', '--project-name', project, '--file', str(path)]
+    ids = run(cli + ['ps', '-a', '-q', *services]).split()
+    running = [run(['docker', 'inspect', '--format', '{{.State.Running}}', cid]).strip() == 'true' for cid in ids]
+    if len(ids) == len(services) and all(running):
+        return False
+    run(cli + ['up', '-d', '--no-recreate'])
+    return True
+
+
 def deploy_config(config_file, overwrite=False, start=False, timeout=600):
     config_file = Path(config_file).resolve()
     config = validate_config(config_file)
@@ -142,6 +163,8 @@ def deploy_config(config_file, overwrite=False, start=False, timeout=600):
         access_path = target / 'access.json'
         access = read_json(access_path) if access_path.exists() else {'apiUrl': deployment['apiUrl'], 'username': auth['username'], 'password': auth['password']}
         previous = Client(access['apiUrl'], access['username'], access['password'])
+        if resume_saved_stack(target, project, [config['docker']['nifiService'], config['docker']['gatewayService']]):
+            previous.wait_ready(timeout)
         before = status(previous, state['groupId'])
         current = previous.get('/process-groups/' + state['groupId'])
         if current.get('runningCount', 0) or before.get('flowFilesQueued', 0) or before.get('activeThreadCount', 0):
