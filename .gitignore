@@ -1,0 +1,9 @@
+local/
+.env
+*.local.json
+*.local.env
+__pycache__/
+*.pyc
+.venv/
+.runner*
+.coverage

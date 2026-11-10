@@ -1,0 +1,72 @@
+name: Export NiFi
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: Source bundle
+        required: true
+        type: choice
+        options: [both, node235, node237]
+        default: both
+      publish:
+        description: Push an export branch when exports change
+        type: boolean
+        default: true
+permissions:
+  contents: write
+  pull-requests: write
+concurrency:
+  group: nifi-export
+  cancel-in-progress: false
+jobs:
+  export:
+    # Only trusted default-branch code may run on the private-network runner.
+    if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
+    runs-on: [self-hosted, linux, x64, nifi-network]
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Export using read-only NiFi requests
+        env:
+          NIFI_SOURCE_USERNAME: ${{ secrets.NIFI_SOURCE_USERNAME }}
+          NIFI_SOURCE_PASSWORD: ${{ secrets.NIFI_SOURCE_PASSWORD }}
+          SOURCE_235_URL: ${{ vars.SOURCE_235_URL }}
+          SOURCE_237_URL: ${{ vars.SOURCE_237_URL }}
+          SELECTED_SOURCE: ${{ inputs.source }}
+        run: |
+          set -euo pipefail
+          test -n "$NIFI_SOURCE_USERNAME"
+          test -n "$NIFI_SOURCE_PASSWORD"
+          if [[ "$SELECTED_SOURCE" == both || "$SELECTED_SOURCE" == node235 ]]; then
+            ./export.sh --url "$SOURCE_235_URL" --name node235 --output bundles/node235 --with-registry
+          fi
+          if [[ "$SELECTED_SOURCE" == both || "$SELECTED_SOURCE" == node237 ]]; then
+            ./export.sh --url "$SOURCE_237_URL" --name node237 --output bundles/node237
+          fi
+      - name: Validate
+        run: |
+          python3 -m unittest discover -s tests -v
+          python3 -m nifi_deploy validate bundles/node235 bundles/node237
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nifi-export-${{ github.run_id }}
+          path: bundles/
+          retention-days: 14
+      - name: Publish export branch
+        if: inputs.publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- bundles/ && [[ -z "$(git ls-files --others --exclude-standard bundles/)" ]]; then
+            echo "No exported configuration changes"
+            exit 0
+          fi
+          branch="Feat/refresh-nifi-export-${GITHUB_RUN_ID}"
+          git switch -c "$branch"
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add bundles/
+          git commit -m 'Feat: refresh exported NiFi configuration'
+          git push origin "$branch"
+          echo "Open a PR: https://github.com/${GITHUB_REPOSITORY}/compare/main...${branch}"
