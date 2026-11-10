@@ -78,7 +78,7 @@
     "processors": 1070
   },
   "flowFile": "flow.json",
-  "flowSha256": "4d1432c390e4920358edfc651bb9c34b557ad5681651bf957ce25127f2ad041d",
+  "flowSha256": "73b7f52082d9f16a155841798221c927af3806abc08ed848b856e236c13a63e0",
   "name": "node237",
   "nginxImage": "nginx:1.27-alpine",
   "nifiImage": "apache/nifi:2.12.0",

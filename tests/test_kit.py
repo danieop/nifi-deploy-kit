@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from nifi_deploy.api import ApiError, Client
 from nifi_deploy.bundle import prepare_snapshot, summary, validate_bundle, write_json, digest
-from nifi_deploy.deployment import apply_parameters, load_env
+from nifi_deploy.deployment import apply_parameters, load_env, import_payload, enable_referenced_services, verify_live
 
 
 SNAPSHOT = {
@@ -38,7 +38,7 @@ class BundleTests(unittest.TestCase):
 
     def test_checksum_mismatch_is_rejected(self):
         with tempfile.TemporaryDirectory() as d:
-            write_json(Path(d) / "flow.json", SNAPSHOT)
+            write_json(Path(d) / "flow.json", prepare_snapshot(SNAPSHOT))
             release = {"schemaVersion": 1, "flowFile": "flow.json", "flowSha256": digest(Path(d) / "flow.json")}
             write_json(Path(d) / "release.json", release)
             validate_bundle(d)
@@ -48,7 +48,7 @@ class BundleTests(unittest.TestCase):
 
     def test_artifact_traversal_is_rejected(self):
         with tempfile.TemporaryDirectory() as d:
-            write_json(Path(d) / "flow.json", SNAPSHOT)
+            write_json(Path(d) / "flow.json", prepare_snapshot(SNAPSHOT))
             write_json(Path(d) / "release.json", {"schemaVersion": 1, "flowFile": "flow.json", "flowSha256": digest(Path(d) / "flow.json"),
                        "artifacts": [{"file": "../secret", "target": "lib", "sha256": "x"}]})
             with self.assertRaisesRegex(ValueError, "artifact"):
@@ -71,6 +71,55 @@ class BundleTests(unittest.TestCase):
 
     def test_url_normalization(self):
         self.assertEqual(Client("http://localhost:9080/nifi/").url, "http://localhost:9080/nifi-api")
+
+    def test_import_uses_upload_entity_not_replace_entity(self):
+        payload = import_payload(SNAPSHOT)
+        self.assertIn("flowSnapshot", payload)
+        self.assertNotIn("versionedFlowSnapshot", payload)
+        self.assertEqual(payload["revisionDTO"]["version"], 0)
+
+    def test_snapshot_run_states_are_native_not_rest_run_states(self):
+        prepared = prepare_snapshot(SNAPSHOT)
+        self.assertEqual(prepared["flowContents"]["scheduledState"], "ENABLED")
+        self.assertEqual(prepared["flowContents"]["controllerServices"][0]["scheduledState"], "DISABLED")
+
+    def test_only_referenced_services_enable_dependency_first(self):
+        class Fake:
+            enabled = []
+            def get(self, path):
+                services = [{"id": x, "component": {"properties": {"dependency": "b"} if x == "a" else {}}}
+                            for x in ["unused", "a", "b"]]
+                if path.endswith("/controller-services"):
+                    return {"controllerServices": services}
+                if path.startswith("/flow/"):
+                    return {"processGroupFlow": {"flow": {"processors": [
+                        {"component": {"state": "STOPPED", "config": {"properties": {"pool": "a"}}}},
+                        {"component": {"state": "DISABLED", "config": {"properties": {"pool": "unused"}}}}]}}}
+                return {"revision": {"version": 0}, "component": {"state": "ENABLED" if path.rsplit("/", 1)[-1] in self.enabled else "DISABLED"}}
+            def request(self, method, path, payload):
+                self.enabled.append(path.split("/")[2])
+        client = Fake()
+        enable_referenced_services(client, "root")
+        self.assertEqual(client.enabled, ["b", "a"])
+
+    def test_verification_reports_type_changes_and_restores_disabled(self):
+        class Fake:
+            requests = []
+            def get(self, path):
+                if path.endswith('/status'):
+                    return {"processGroupStatus": {"aggregateSnapshot": {"flowFilesQueued": 0}}}
+                if path.endswith('/controller-services'):
+                    return {"controllerServices": []}
+                return {"processGroupFlow": {"flow": {"processors": [{"id": "actual", "revision": {"version": 0},
+                    "component": {"versionedComponentId": "original", "type": "Changed", "state": "STOPPED"}}]}}}
+            def request(self, method, path, payload):
+                self.requests.append(payload["state"])
+        client = Fake()
+        expected = {"processors": 1, "controllerServices": 0, "connections": 0, "processGroups": 1}
+        snapshot = {"flowContents": {"processors": [{"identifier": "original", "type": "Original", "scheduledState": "DISABLED"}]}}
+        result = verify_live(client, "group", expected, snapshot)
+        self.assertEqual(client.requests, ["DISABLED"])
+        self.assertEqual(len(result["typeMismatches"]), 1)
 
     def test_export_uses_only_get(self):
         from nifi_deploy.bundle import export_bundle

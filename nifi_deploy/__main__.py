@@ -43,6 +43,9 @@ def main():
                       for p in args.bundles]
         else:
             result = deploy(args.bundle, args.env, args.parameters, args.overwrite_config, args.start, args.timeout)
+            result = {**{k: v for k, v in result.items() if k not in ("invalidProcessors", "typeMismatches")},
+                      "invalidProcessorCount": len(result["invalidProcessors"]),
+                      "typeMismatchCount": len(result["typeMismatches"])}
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (ValueError, RuntimeError, OSError, KeyError) as error:
         print(f"ERROR: {error}", file=sys.stderr)
