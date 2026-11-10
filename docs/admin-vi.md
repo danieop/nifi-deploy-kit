@@ -21,7 +21,7 @@ không đọc queue content và không lấy lại giá trị secret đã bị N
 1. Cài Docker + Compose, Python 3.10+; cấp quyền Docker cho tài khoản triển khai.
 2. Clone repo, checkout commit/tag đã bàn giao.
 3. Copy `examples/deploy.env.example` thành `local/deploy.env`, quyền 600.
-4. Điền:
+4. Điền (chọn deployment directory mà tài khoản hiện tại có quyền ghi):
    - Bắt buộc: `COMPOSE_PROJECT_NAME`, `DEPLOY_DIRECTORY` tuyệt đối,
      `NGINX_USERNAME`, `NGINX_PASSWORD`.
    - Có mặc định: `HTTP_PORT=9080`, `BIND_ADDRESS=127.0.0.1`, heap 1g/2g.
@@ -31,8 +31,14 @@ không đọc queue content và không lấy lại giá trị secret đã bị N
 6. Đọc `parameters.required.json`; tạo `local/parameters.local.json` theo context
    thực tế. Điền endpoint và secret của môi trường khách. Không copy dấu che
    `********` thành mật khẩu. Không bắt buộc khai báo parameter không đổi.
+   Nếu secret/property ghi trực tiếp trên processor/service thay vì parameter,
+   copy `examples/components.local.example.json` thành `local/components.local.json`.
+   Điền `groups` là đường dẫn tên group tương đối dưới ứng dụng (root dùng `[]`),
+   `kind`, tên component chính xác và map property theo API Name NiFi. Component
+   phải stopped/disabled; script không xóa property không được khai báo.
 7. Chạy `./deploy.sh --bundle bundles/node235 --env local/deploy.env`.
    Thêm `--parameters local/parameters.local.json` khi đã có file override.
+   Thêm `--components local/components.local.json` khi có direct property override.
 8. Mở URL được in ra. Kiểm tra `report.json`, các component invalid, kết nối
    RabbitMQ/Elasticsearch/Kafka và credential. Flow mặc định chưa chạy nghiệp vụ.
 9. Khi cấu hình đạt yêu cầu, chạy lại cùng lệnh với `--start` để enable service
@@ -59,6 +65,7 @@ không đọc queue content và không lấy lại giá trị secret đã bị N
 | Port và thư mục riêng | Bắt buộc, có default cho port |
 | Username/password Nginx | Bắt buộc; script tạo bcrypt `.htpasswd` bằng image httpd |
 | Endpoint/secret của flow | Bắt buộc theo component sẽ bật |
+| File direct component overrides | Tùy chọn; dùng khi property chưa được parameter hóa |
 | NAR/JAR trong release | Bắt buộc theo dependency, script kiểm checksum |
 | Registry | Theo profile bundle |
 | GitLab Registry Clients và token | Chỉ cần khi muốn dùng chức năng registry; cấu hình riêng |

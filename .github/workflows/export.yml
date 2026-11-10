@@ -14,7 +14,6 @@ on:
         default: true
 permissions:
   contents: write
-  pull-requests: write
 concurrency:
   group: nifi-export
   cancel-in-progress: false

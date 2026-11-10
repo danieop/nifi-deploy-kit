@@ -7,7 +7,7 @@ from unittest.mock import patch
 
 from nifi_deploy.api import ApiError, Client
 from nifi_deploy.bundle import prepare_snapshot, summary, validate_bundle, write_json, digest
-from nifi_deploy.deployment import apply_parameters, load_env, import_payload, enable_referenced_services, verify_live
+from nifi_deploy.deployment import apply_parameters, apply_components, load_env, import_payload, enable_referenced_services, verify_live
 
 
 SNAPSHOT = {
@@ -68,6 +68,18 @@ class BundleTests(unittest.TestCase):
                 return {"revision": {"version": 1}, "component": {"parameters": [{"parameter": {"name": "secret", "sensitive": True}}]}}
         with self.assertRaisesRegex(ValueError, "Null"):
             apply_parameters(Fake(), {"p": {"secret": None}})
+
+    def test_direct_service_override_keeps_properties_scoped(self):
+        class Fake:
+            payload = None
+            def get(self, path):
+                entity = {"id": "s", "revision": {"version": 2}, "component": {"name": "db", "parentGroupId": "root", "state": "DISABLED"}}
+                return {"controllerServices": [entity]} if path.startswith('/flow/') else entity
+            def request(self, method, path, payload):
+                self.payload = payload
+        client = Fake()
+        apply_components(client, "root", [{"kind": "controller-service", "name": "db", "properties": {"Password": "local-only"}}])
+        self.assertEqual(client.payload["component"], {"id": "s", "properties": {"Password": "local-only"}})
 
     def test_url_normalization(self):
         self.assertEqual(Client("http://localhost:9080/nifi/").url, "http://localhost:9080/nifi-api")
