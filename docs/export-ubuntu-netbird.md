@@ -12,7 +12,9 @@ git clone https://github.com/danieop/nifi-deploy-kit.git
 cd nifi-deploy-kit
 ```
 
-Trong thư mục repo, sửa các giá trị sau theo server cần export:
+Mở Terminal tại thư mục `nifi-deploy-kit`. Sửa giá trị trong đoạn lệnh dưới
+rồi **dán vào Terminal**; đây là biến của terminal, không phải file cấu hình.
+Giữ cùng terminal để chạy các bước tiếp theo:
 
 ```bash
 SOURCE_IP=10.0.0.235

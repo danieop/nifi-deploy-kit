@@ -15,32 +15,43 @@ Bundle phải gồm đủ `flow.json`, `config.json`, `assets/`.
 Admin có thể SSH vào máy đích để chạy script. Máy đích không cần SSH sang máy
 nguồn vì toàn bộ cấu hình/dependency đã nằm trong bundle.
 
-## 2. Tải bundle
+## 2. Đặt folder bundle vào repo local
+
+Tải code về máy đích nếu chưa có:
 
 ```bash
 git clone https://github.com/danieop/nifi-deploy-kit.git
 cd nifi-deploy-kit
 mkdir -p local
 chmod 700 local
+```
 
-# Thay RUN_ID bằng ID lần export được bàn giao; gh cần đăng nhập.
-gh run download RUN_ID --repo danieop/nifi-deploy-kit \
-  -n nifi-export-RUN_ID -D local/customer-a
+Dán **toàn bộ folder bundle đã export** vào `local/`, ví dụ đặt tên `customer-a`:
+
+```text
+nifi-deploy-kit/
+├── deploy.sh
+└── local/
+    └── customer-a/
+        ├── flow.json
+        ├── config.json
+        └── assets/
+```
+
+Mở Terminal tại `nifi-deploy-kit`, chỉnh file của đúng folder vừa dán:
+
+```bash
 chmod 600 local/customer-a/config.json
 nano local/customer-a/config.json
 ```
 
-Artifact chứa các file ngay ở root thư mục tải về. Dùng thư mục riêng cho từng
-lần tải để giữ cấu hình đã chỉnh. Hoặc copy một bundle có sẵn:
+Tên folder do bạn chọn. Nếu dùng tên khác, thay `local/customer-a` trong các lệnh
+bằng đường dẫn thực tế. Script lấy flow/assets theo config của folder đó.
 
-```bash
-cp -a bundles/node235 local/customer-a
-```
-
-Chọn một cách lấy bundle. Các bundle node235/node237 trong repo là dữ liệu mẫu;
-server nguồn của workflow được nhập khi chạy. Để tự export nguồn, xem
-[workflow GitHub](export-workflow.md) hoặc
-[export trực tiếp trên Ubuntu/NetBird](export-ubuntu-netbird.md).
+Bundle có sẵn trong repo tại `bundles/node235` và `bundles/node237` cũng dùng được;
+copy folder bạn cần vào `local/` trước khi chỉnh. Nếu lấy artifact CI, xem bước tải
+trong [workflow GitHub](export-workflow.md). Để export từ máy cá nhân, xem
+[export Ubuntu/NetBird](export-ubuntu-netbird.md).
 
 ## 3. Sửa config.json
 
