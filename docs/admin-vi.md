@@ -39,7 +39,8 @@ cp -a bundles/node235 local/customer-a
 
 Chọn một cách lấy bundle. Các bundle node235/node237 trong repo là dữ liệu mẫu;
 server nguồn của workflow được nhập khi chạy. Để tự export nguồn, xem
-[export-workflow.md](export-workflow.md).
+[workflow GitHub](export-workflow.md) hoặc
+[export trực tiếp trên Ubuntu/NetBird](export-ubuntu-netbird.md).
 
 ## 3. Sửa config.json
 

@@ -1,7 +1,8 @@
 # NiFi Deploy Kit
 
-Export a running NiFi Docker Compose deployment with GitHub Actions, then deploy
-it on another single Docker host by editing one `config.json`.
+Export a running NiFi Docker Compose deployment from an Ubuntu workstation or
+GitHub Actions, then deploy it on another single Docker host by editing one
+`config.json`.
 
 ```text
 Source: NiFi GET API + read-only SSH Docker/file inspection
@@ -19,6 +20,10 @@ Python 3.10+ standard library; no pip packages. Tested NiFi baseline: **2.12.0**
 standalone Docker Compose with HTTP NiFi behind Nginx Basic Auth.
 
 ## Export
+
+For an Ubuntu workstation already connected to NetBird, follow the
+[local export guide](docs/export-ubuntu-netbird.md). It runs independently of
+GitHub Actions and does not require Docker on the workstation.
 
 Open [Actions → Export NiFi → Run workflow](https://github.com/danieop/nifi-deploy-kit/actions/workflows/export.yml)
 on `main`. Enter bundle name, NiFi URL, SSH `user@host`, source Compose file and
