@@ -25,23 +25,28 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Export using read-only NiFi requests
+      - name: Export NiFi and Docker using read-only requests
         env:
           NIFI_SOURCE_USERNAME: ${{ secrets.NIFI_SOURCE_USERNAME }}
           NIFI_SOURCE_PASSWORD: ${{ secrets.NIFI_SOURCE_PASSWORD }}
           SOURCE_235_URL: ${{ vars.SOURCE_235_URL }}
           SOURCE_237_URL: ${{ vars.SOURCE_237_URL }}
           SELECTED_SOURCE: ${{ inputs.source }}
+          NIFI_SOURCE_235_SSH_PASSWORD: ${{ secrets.NIFI_SOURCE_235_SSH_PASSWORD }}
+          NIFI_SOURCE_237_SSH_PASSWORD: ${{ secrets.NIFI_SOURCE_237_SSH_PASSWORD }}
+          NIFI_SOURCE_SSH_KEY: ${{ secrets.NIFI_SOURCE_SSH_KEY }}
         run: |
           set -euo pipefail
           test -n "$NIFI_SOURCE_USERNAME"
           test -n "$NIFI_SOURCE_PASSWORD"
-          if [[ "$SELECTED_SOURCE" == both || "$SELECTED_SOURCE" == node235 ]]; then
-            ./export.sh --url "$SOURCE_235_URL" --name node235 --output bundles/node235 --with-registry
+          key_file="$RUNNER_TEMP/nifi-source-key-$GITHUB_RUN_ID"
+          trap 'rm -f "$key_file"' EXIT
+          if [[ -n "$NIFI_SOURCE_SSH_KEY" ]]; then
+            umask 077
+            printf '%s\n' "$NIFI_SOURCE_SSH_KEY" > "$key_file"
+            export NIFI_SOURCE_SSH_IDENTITY="$key_file"
           fi
-          if [[ "$SELECTED_SOURCE" == both || "$SELECTED_SOURCE" == node237 ]]; then
-            ./export.sh --url "$SOURCE_237_URL" --name node237 --output bundles/node237
-          fi
+          python3 scripts/ci-export.py
       - name: Validate
         run: |
           python3 -m unittest discover -s tests -v

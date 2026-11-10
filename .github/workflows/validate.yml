@@ -20,7 +20,7 @@ jobs:
       - name: Validate exported bundles
         run: |
           shopt -s nullglob
-          bundles=(bundles/*/release.json)
+          bundles=(bundles/*/config.json bundles/*/release.json)
           for manifest in "${bundles[@]}"; do
             python3 -m nifi_deploy validate "$(dirname "$manifest")"
           done

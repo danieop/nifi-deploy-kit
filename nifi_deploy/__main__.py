@@ -4,8 +4,11 @@ import os
 import sys
 
 from .api import Client
-from .bundle import export_bundle, read_json, validate_bundle
+from .bundle import read_json, validate_bundle
 from .deployment import deploy
+from .configuration import export_deployment
+from .docker_export import capture_docker
+from .portable_deployment import deploy_config
 
 
 def main():
@@ -18,12 +21,23 @@ def main():
     export.add_argument("--group-id")
     export.add_argument("--auth-file", help="Private JSON containing username/password")
     export.add_argument("--ca-file")
-    export.add_argument("--with-registry", action="store_true")
+    source = export.add_mutually_exclusive_group(required=True)
+    source.add_argument("--docker-host", help="SSH user@host for read-only Docker capture")
+    source.add_argument("--docker-local", action="store_true", help="Read Docker on this host")
+    export.add_argument("--docker-sudo", action="store_true", help="Use sudo for Docker reads on source (passwordless or private env password)")
+    export.add_argument("--compose-file", required=True, help="Absolute source Compose file")
+    export.add_argument("--compose-project", default="")
+    export.add_argument("--ssh-port", type=int, default=22)
+    export.add_argument("--ssh-identity")
+    export.add_argument("--ssh-known-hosts")
+    export.add_argument("--nifi-service", default="nifi")
+    export.add_argument("--gateway-service", default="nginx")
     validate = commands.add_parser("validate")
     validate.add_argument("bundles", nargs="+")
     install = commands.add_parser("deploy")
-    install.add_argument("--bundle", required=True)
-    install.add_argument("--env", required=True)
+    install.add_argument("--bundle", help="Legacy schema 1 bundle")
+    install.add_argument("--env", help="Legacy schema 1 local env")
+    install.add_argument("--config", help="Customer-edited schema 2 config.json (primary deployment interface)")
     install.add_argument("--parameters")
     install.add_argument("--components", help="Optional private JSON array of direct component property overrides")
     install.add_argument("--overwrite-config", action="store_true")
@@ -38,12 +52,23 @@ def main():
                 "username": os.environ.get("NIFI_SOURCE_USERNAME", ""),
                 "password": os.environ.get("NIFI_SOURCE_PASSWORD", "")}
             client = Client(args.url, auth.get("username", ""), auth.get("password", ""), args.ca_file)
-            result = export_bundle(client, args.output, args.name, args.group_id, args.with_registry)
+            raw = capture_docker(args.docker_host, args.compose_file, args.compose_project,
+                                 args.ssh_port, args.ssh_identity, args.ssh_known_hosts, args.docker_sudo)
+            config = export_deployment(client, raw, args.output, args.name, args.group_id, args.nifi_service, args.gateway_service)
+            result = {"name": config["name"], "schemaVersion": 2, "counts": config["flow"]["counts"],
+                      "services": list(config["docker"]["compose"]["services"]), "configFile": args.output + "/config.json"}
         elif args.command == "validate":
             result = [{"name": (r := validate_bundle(p))["name"], "counts": r["counts"], "valid": True}
                       for p in args.bundles]
         else:
-            result = deploy(args.bundle, args.env, args.parameters, args.overwrite_config, args.start, args.timeout, args.components)
+            if args.config:
+                if any((args.bundle, args.env, args.parameters, args.components)):
+                    raise ValueError("--config contains all settings; do not combine it with legacy file options")
+                result = deploy_config(args.config, args.overwrite_config, args.start, args.timeout)
+            else:
+                if not args.bundle or not args.env:
+                    raise ValueError("Use --config path/to/config.json (or legacy --bundle and --env)")
+                result = deploy(args.bundle, args.env, args.parameters, args.overwrite_config, args.start, args.timeout, args.components)
             result = {**{k: v for k, v in result.items() if k not in ("invalidProcessors", "typeMismatches")},
                       "invalidProcessorCount": len(result["invalidProcessors"]),
                       "typeMismatchCount": len(result["typeMismatches"])}

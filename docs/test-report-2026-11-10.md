@@ -1,3 +1,5 @@
+> Historical v0.1 report. Current workflow uses schema 2; see [admin guide](admin-vi.md).
+
 # Báo cáo kiểm chứng — 10/11/2026
 
 ## Kết quả

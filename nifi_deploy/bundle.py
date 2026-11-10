@@ -114,6 +114,10 @@ def export_bundle(client, output, name, group_id=None, registry=False):
 
 def validate_bundle(path):
     path = Path(path).resolve()
+    if (path / "config.json").exists():
+        from .configuration import validate_config
+        config = validate_config(path / "config.json")
+        return {"schemaVersion": 2, "name": config["name"], "counts": config["flow"]["counts"]}
     release = read_json(path / "release.json")
     if release.get("schemaVersion") != 1:
         raise ValueError("Unsupported bundle schema")
