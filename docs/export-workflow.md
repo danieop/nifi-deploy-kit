@@ -1,5 +1,8 @@
 # Export server bất kỳ bằng GitHub Actions
 
+Để export trực tiếp bằng máy cá nhân Ubuntu đã có NetBird, dùng
+[hướng dẫn export local](export-ubuntu-netbird.md); không cần GitHub runner.
+
 Một lần chạy = một nguồn = một bundle. Không cần thêm server vào source list,
 không sửa workflow và không đặt tên Secret theo IP. Workflow hiện tại chỉ chạy
 code trên default branch `main`, trên trusted self-hosted Linux/x64 runner.
