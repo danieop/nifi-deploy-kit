@@ -29,7 +29,7 @@ queues, checkpoints and Registry history are not copied.
 ```bash
 git clone https://github.com/danieop/nifi-deploy-kit.git
 cd nifi-deploy-kit
-git checkout v0.2.0
+git checkout v0.3.0
 mkdir -p local
 chmod 700 local
 cp -a bundles/node235 local/node235
@@ -94,7 +94,7 @@ SSH/sudo/API audit logs may still be generated.
   --auth-file local/source-auth.json \
   --docker-host ubuntu@SOURCE \
   --compose-file /home/ubuntu/nifi/compose.yml \
-  --compose-project nifi --ssh-known-hosts sources/known_hosts \
+  --compose-project nifi --ssh-known-hosts local/known_hosts \
   --output bundles/customer-app
 ```
 
@@ -104,30 +104,65 @@ Use SSH agent/default keys or `--ssh-identity`. Password authentication can use
 the SSH password), sent over stdin. Never put passwords in command arguments.
 For same-host export, replace `--docker-host` with `--docker-local`.
 
-## GitHub Actions
+## GitHub Actions: export any source host
 
-- **Validate:** unit tests, checksums, native flow counts, shell and Compose checks.
-- **Export NiFi:** manual, trusted default-branch code only, trusted self-hosted
-  runner labelled `self-hosted, linux, x64, nifi-network` with source network access.
-  Reads `sources/hosts.json` and verified `sources/known_hosts`.
-- Secrets: `NIFI_SOURCE_USERNAME`, `NIFI_SOURCE_PASSWORD`; optional
-  `NIFI_SOURCE_SSH_KEY`, or `NIFI_SOURCE_235_SSH_PASSWORD` and
-  `NIFI_SOURCE_237_SSH_PASSWORD`. These source users use Docker through sudo.
-- Optional URL overrides: repository variables `SOURCE_235_URL`, `SOURCE_237_URL`.
-- Exports both bundles, validates, uploads `nifi-export-RUN_ID`, optionally pushes
-  an export branch. A maintainer opens/merges its PR; no direct pushes to main and
-  no changes to repository approval settings.
+Open **Actions → Export NiFi → Run workflow** on `main`. Enter a bundle name,
+NiFi URL, SSH `user@host`, absolute source Compose file and the name of a GitHub
+Secret holding that server's credentials. Optional fields cover Compose project,
+SSH port, sudo, service names, process-group ID and the network runner label.
+There is no source inventory or hardcoded server list to edit.
+
+Create one credential profile per server, outside Git, from
+`examples/export-credentials.example.json`, then upload it:
 
 ```bash
-gh workflow run export.yml -f source=both -f publish=true
-gh run download RUN_ID -n nifi-export-RUN_ID -D local/downloaded
-# Edit local/downloaded/node235/config.json before deploying.
-./deploy.sh --config local/downloaded/node235/config.json
+gh secret set CUSTOMER_A_EXPORT --repo danieop/nifi-deploy-kit \
+  < local/customer-a-credentials.json
 ```
 
-Source credentials and edited customer config must stay outside Git. `local/` is
-ignored. A network runner must be online for each export; the test runner was
-ephemeral, not a permanently installed service.
+The JSON contains `apiUsername`, `apiPassword`, `sshPassword` (or `sshPrivateKey`)
+and **verified** `knownHosts` content. Optional `sudoPassword` is independent of
+SSH; omit it for SSH-password fallback or passwordless sudo. Optional `apiCaPem`
+trusts a private source API CA. Passwords/private keys never go in dispatch inputs.
+See the [workflow guide](docs/export-workflow.md) for field-by-field setup.
+
+```bash
+gh workflow run export.yml --repo danieop/nifi-deploy-kit --ref main \
+  -f bundle_name=customer-a-prod \
+  -f nifi_url=http://nifi.customer.lan:9080/nifi \
+  -f docker_host=ubuntu@nifi.customer.lan \
+  -f compose_file=/opt/nifi/compose.yml \
+  -f credentials_secret=CUSTOMER_A_EXPORT \
+  -f docker_sudo=true \
+  -f publish=true
+```
+
+A trusted self-hosted Linux/x64 runner must reach that source. It needs label
+`nifi-network` by default; select another `runner_label` for a different customer
+network. Only trusted default-branch code can run. Temporary credential files are
+mode 600 and removed on success/failure; decoded secret fields are log-masked.
+The source still needs the supported Docker Compose + NiFi/Nginx baseline.
+
+Each run exports and validates **one** selected bundle. Artifact
+`nifi-export-RUN_ID` contains `flow.json`, `config.json` and `assets/` **at its root**,
+not all repository bundles. Artifacts retain for 14 days. `publish` defaults to
+false; enable it to push only `bundles/<bundle_name>` to an export branch when
+changed. A maintainer opens/merges the PR; main and existing release tags do not
+change automatically. Artifacts in this public repo are downloadable by GitHub
+users with read access: disabling publish is not a privacy control. Review
+ordinary script/URL/binary content before exporting to a public repository.
+
+```bash
+# Replace RUN_ID with the selected workflow run ID; log in with gh first.
+gh run download RUN_ID --repo danieop/nifi-deploy-kit \
+  -n nifi-export-RUN_ID -D local/export-RUN_ID
+${EDITOR:-vi} local/export-RUN_ID/config.json
+./deploy.sh --config local/export-RUN_ID/config.json
+```
+
+GitHub `Validate` remains independent and discovers all repository bundles.
+`node235` and `node237` are example bundles, not selectable fixed source hosts.
+Old per-host Secrets/Variables and `sources/hosts.json` are no longer used.
 
 ## Redeploy and scope
 

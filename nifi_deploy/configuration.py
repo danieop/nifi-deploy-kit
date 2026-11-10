@@ -1,5 +1,6 @@
 """Portable two-JSON bundle contract and customer-editable NiFi settings."""
 import copy
+import hashlib
 import re
 import shutil
 import tempfile
@@ -115,9 +116,12 @@ def _export_deployment(client, raw_docker, output, name, group_id=None, nifi_ser
     write_json(output / 'flow.json', snapshot)
     about = client.get('/flow/about')['about']
     inventories = client.get('/controller/registry-clients').get('registries', [])
+    project = 'nifi-' + name
+    if len(project) > 63:
+        project = project[:50] + '-' + hashlib.sha256(name.encode()).hexdigest()[:12]
     config = {'schemaVersion': 2, 'name': name, 'nifiVersion': about['version'],
               'flow': {'file': 'flow.json', 'sha256': digest(output / 'flow.json'), **summary(snapshot)},
-              'deployment': {'projectName': 'nifi-' + name, 'directory': './runtime/' + name,
+              'deployment': {'projectName': project, 'directory': './runtime/' + name,
                              'apiUrl': f'http://127.0.0.1:{port}/nifi',
                              'gatewayAuth': {'username': 'nifiadmin', 'password': SECRET, 'file': auth_file}},
               'docker': docker, 'assets': assets, 'localFiles': files,

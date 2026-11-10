@@ -21,40 +21,56 @@ Không cài phần mềm, không ghi file, không restart/exec container trên V
 SSH/sudo/API vẫn có thể tạo audit log bình thường. Export lúc không có người sửa
 cấu hình nguồn để tránh hai snapshot lấy ở hai thời điểm khác nhau.
 
-## 2. Admin quản lý nguồn và GitHub
+## 2. Export server bất kỳ bằng GitHub Actions
 
-1. Trong `sources/hosts.json`, khai báo URL NiFi, `dockerHost=user@host`, đường dẫn
-   tuyệt đối `composeFile`, `composeProject`, và `dockerSudo` nếu cần quyền sudo.
-2. Xác minh fingerprint SSH qua kênh tin cậy, cập nhật `sources/known_hosts`.
-   Script bật StrictHostKeyChecking; không tự chấp nhận key mới.
-3. Source cần Python 3 và Docker Compose. Tài khoản SSH có quyền đọc Docker/file
-   hoặc quyền sudo phù hợp. Script không tự sửa group/quyền trên source.
-4. Chuẩn bị trusted self-hosted runner có Python 3.10+, OpenSSH, kết nối tới hai
-   nguồn; đăng ký labels `self-hosted, linux, x64, nifi-network`.
-5. Cấu hình repository Secrets:
-   - `NIFI_SOURCE_USERNAME`, `NIFI_SOURCE_PASSWORD`: Basic Auth vào API nguồn.
-   - SSH key dùng chung: optional `NIFI_SOURCE_SSH_KEY`, hoặc password riêng
-     `NIFI_SOURCE_235_SSH_PASSWORD`, `NIFI_SOURCE_237_SSH_PASSWORD`.
-   - Khi dùng password, sudo dùng cùng password; CLI manual hỗ trợ password sudo
-     riêng qua `NIFI_SOURCE_SUDO_PASSWORD`. SSH key cần sudo passwordless trong CI.
-6. Chạy Actions → **Export NiFi** → **Run workflow**, chọn nguồn.
-7. CI export/validate/upload artifact; khi có thay đổi và bật publish, nó tạo
-   nhánh export. Mở PR theo compare URL trong log, kiểm tra và merge main.
-8. Bàn giao artifact hoặc release/commit đã kiểm tra. Workflow không đổi quyền
-   GitHub Actions và không push trực tiếp main.
+Không cần sửa code hoặc khai báo IP trong repo. Một lần chạy export một server.
 
-Các runner test là tạm thời và tự gỡ sau job. Admin cần runner của mình online
-cho các lần export sau; nếu không, workflow sẽ chờ runner.
+1. Chuẩn bị trusted self-hosted Linux/x64 runner có Python 3.10+, OpenSSH và
+   kết nối tới SSH/API của nguồn. Runner có label `nifi-network`, hoặc label riêng
+   do bạn nhập ở `runner_label` khi chạy workflow.
+2. Tạo GitHub Secret dạng JSON cho nguồn mới, ví dụ `CUSTOMER_A_EXPORT`, chứa
+   credential API/SSH và SSH host key đã xác minh. Dùng mẫu
+   `examples/export-credentials.example.json`. Không nhập password vào form workflow.
+3. Mở **Actions → Export NiFi → Run workflow**, chọn branch **main**, điền:
+
+   | Trường | Ví dụ |
+   |---|---|
+   | `bundle_name` | `customer-a-prod` — tên bất kỳ, chữ thường/số/dấu gạch ngang |
+   | `nifi_url` | `http://nifi.customer.lan:9080/nifi` |
+   | `docker_host` | `ubuntu@nifi.customer.lan` |
+   | `compose_file` | `/opt/nifi/compose.yml` trên nguồn |
+   | `credentials_secret` | `CUSTOMER_A_EXPORT` — tên Secret đã tạo |
+   | `docker_sudo` | Bật nếu tài khoản cần sudo để đọc Docker |
+   | `publish` | Bật nếu muốn tạo nhánh cập nhật bundle trong repo |
+
+4. Các trường còn lại có mặc định; chỉ đổi nếu khác hạ tầng: Compose project,
+   SSH port, tên service NiFi/Nginx, group ID và runner label.
+5. CI chỉ đọc nguồn, validate rồi upload artifact `nifi-export-RUN_ID`. Artifact
+   chứa đúng bundle của lần này ở root: `flow.json`, `config.json`, `assets/`.
+6. Nếu bật publish và có thay đổi, CI tạo nhánh chỉ chứa cập nhật
+   `bundles/<bundle_name>`. Mở PR từ compare URL trong log, kiểm tra và merge main.
+   Không thay đổi thì không tạo nhánh; artifact vẫn có ở mỗi lần thành công.
+7. Main, tag release, file local đã sửa và NiFi đang chạy ở khách không tự thay
+   theo workflow. Admin phải chọn bundle mới và chủ động deploy lại.
+
+Cách tạo credential profile, chạy bằng gh và đổi nguồn:
+[xem hướng dẫn workflow](export-workflow.md). Không còn dùng `sources/hosts.json`,
+Secrets có hậu tố 235/237 hay Variables `SOURCE_235_URL`/`SOURCE_237_URL`.
+
+Source vẫn cần Python 3, Docker Compose, quyền Docker/file hoặc sudo phù hợp.
+Workflow không tự cài phần mềm hay sửa quyền trên source. Các runner test là
+runner tạm; admin cần runner online cho lần export sau.
 
 ## 3. Admin trên máy khách: tải và sửa đúng một file
 
 Máy khách cần Docker + Compose, Python 3.10+, quyền Docker, đủ RAM/đĩa, kết nối
-tới image registry và backend nghiệp vụ. Không cần SSH tới nguồn để deploy.
+tới image registry và backend nghiệp vụ. Admin chạy deploy.sh trên máy đích (có thể SSH vào máy đích để thao tác). Máy đích
+không cần SSH sang nguồn: cấu hình đã có trong bundle.
 
 ```bash
 git clone https://github.com/danieop/nifi-deploy-kit.git
 cd nifi-deploy-kit
-git checkout v0.2.0
+git checkout v0.3.0
 mkdir -p local
 chmod 700 local
 cp -a bundles/node235 local/node235
@@ -62,11 +78,14 @@ chmod 600 local/node235/config.json
 nano local/node235/config.json
 ```
 
-Chọn `node237` nếu cần bản export của máy .237. Hoặc tải artifact CI:
+Hai bundle `node235`/`node237` chỉ là ví dụ đã bàn giao. Để dùng nguồn vừa export,
+tải artifact CI. Từ workflow mới, các file nằm ngay ở root thư mục tải về:
 
 ```bash
-gh run download RUN_ID -n nifi-export-RUN_ID -D local/downloaded
-nano local/downloaded/node235/config.json
+gh run download RUN_ID --repo danieop/nifi-deploy-kit \
+  -n nifi-export-RUN_ID -D local/export-RUN_ID
+nano local/export-RUN_ID/config.json
+./deploy.sh --config local/export-RUN_ID/config.json
 ```
 
 ### Những mục cần chỉnh trong config.json

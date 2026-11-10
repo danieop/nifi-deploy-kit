@@ -79,6 +79,13 @@ class PortableTests(unittest.TestCase):
             validate_config(Path(temp) / 'config.json')
             self.assertFalse((Path(temp) / 'assets/.htpasswd').exists())
 
+    def test_long_bundle_names_produce_distinct_valid_default_project_names(self):
+        with tempfile.TemporaryDirectory() as temp:
+            first=export_deployment(FakeExport(),raw_docker(),Path(temp)/'a','x'*62+'a')
+            second=export_deployment(FakeExport(),raw_docker(),Path(temp)/'b','x'*62+'b')
+            self.assertLessEqual(len(first['deployment']['projectName']),63)
+            self.assertNotEqual(first['deployment']['projectName'],second['deployment']['projectName'])
+
     def test_actual_runtime_storage_and_ports_are_portable(self):
         with tempfile.TemporaryDirectory() as temp:
             docker, assets, files, auth, port = portable_docker(raw_docker(), temp)

@@ -1,17 +1,60 @@
 name: Export NiFi
+run-name: Export ${{ inputs.bundle_name }}
 on:
   workflow_dispatch:
     inputs:
-      source:
-        description: Source bundle
+      bundle_name:
+        description: 'Bundle name, e.g. customer-a-prod (lowercase letters/digits/hyphens)'
         required: true
-        type: choice
-        options: [both, node235, node237]
-        default: both
-      publish:
-        description: Push an export branch when exports change
+        type: string
+      nifi_url:
+        description: 'Source NiFi URL, e.g. http://nifi.customer.lan:9080/nifi'
+        required: true
+        type: string
+      docker_host:
+        description: 'Source SSH user@hostname or user@IPv4'
+        required: true
+        type: string
+      compose_file:
+        description: 'Absolute source Compose file, e.g. /opt/nifi/compose.yml'
+        required: true
+        type: string
+      credentials_secret:
+        description: 'Repository Secret name holding JSON credentials and verified knownHosts'
+        required: true
+        default: NIFI_EXPORT_CREDENTIALS
+        type: string
+      compose_project:
+        description: 'Source Compose project (blank = resolved Compose name)'
+        type: string
+      ssh_port:
+        description: 'Source SSH port'
+        type: number
+        default: 22
+      docker_sudo:
+        description: 'Use sudo for read-only Docker inspection on source'
         type: boolean
-        default: true
+        default: false
+      nifi_service:
+        description: 'NiFi service name in source Compose'
+        type: string
+        default: nifi
+      gateway_service:
+        description: 'HTTP Basic Auth Nginx service name in source Compose'
+        type: string
+        default: nginx
+      group_id:
+        description: 'Optional source process-group ID (blank = root)'
+        type: string
+      runner_label:
+        description: 'Trusted Linux/x64 self-hosted runner label with access to this source'
+        required: true
+        type: string
+        default: nifi-network
+      publish:
+        description: 'Also push this bundle to an export branch for maintainer review'
+        type: boolean
+        default: false
 permissions:
   contents: write
 concurrency:
@@ -19,58 +62,60 @@ concurrency:
   cancel-in-progress: false
 jobs:
   export:
-    # Only trusted default-branch code may run on the private-network runner.
+    # Only trusted default-branch code runs with source credentials/network access.
     if: github.ref == format('refs/heads/{0}', github.event.repository.default_branch)
-    runs-on: [self-hosted, linux, x64, nifi-network]
+    runs-on: [self-hosted, linux, x64, '${{ inputs.runner_label }}']
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-      - name: Export NiFi and Docker using read-only requests
+      - name: Export selected NiFi and Docker source (read-only)
+        id: export
         env:
-          NIFI_SOURCE_USERNAME: ${{ secrets.NIFI_SOURCE_USERNAME }}
-          NIFI_SOURCE_PASSWORD: ${{ secrets.NIFI_SOURCE_PASSWORD }}
-          SOURCE_235_URL: ${{ vars.SOURCE_235_URL }}
-          SOURCE_237_URL: ${{ vars.SOURCE_237_URL }}
-          SELECTED_SOURCE: ${{ inputs.source }}
-          NIFI_SOURCE_235_SSH_PASSWORD: ${{ secrets.NIFI_SOURCE_235_SSH_PASSWORD }}
-          NIFI_SOURCE_237_SSH_PASSWORD: ${{ secrets.NIFI_SOURCE_237_SSH_PASSWORD }}
-          NIFI_SOURCE_SSH_KEY: ${{ secrets.NIFI_SOURCE_SSH_KEY }}
-        run: |
-          set -euo pipefail
-          test -n "$NIFI_SOURCE_USERNAME"
-          test -n "$NIFI_SOURCE_PASSWORD"
-          key_file="$RUNNER_TEMP/nifi-source-key-$GITHUB_RUN_ID"
-          trap 'rm -f "$key_file"' EXIT
-          if [[ -n "$NIFI_SOURCE_SSH_KEY" ]]; then
-            umask 077
-            printf '%s\n' "$NIFI_SOURCE_SSH_KEY" > "$key_file"
-            export NIFI_SOURCE_SSH_IDENTITY="$key_file"
-          fi
-          python3 scripts/ci-export.py
-      - name: Validate
+          EXPORT_BUNDLE_NAME: ${{ inputs.bundle_name }}
+          EXPORT_NIFI_URL: ${{ inputs.nifi_url }}
+          EXPORT_DOCKER_HOST: ${{ inputs.docker_host }}
+          EXPORT_COMPOSE_FILE: ${{ inputs.compose_file }}
+          EXPORT_COMPOSE_PROJECT: ${{ inputs.compose_project }}
+          EXPORT_SSH_PORT: ${{ inputs.ssh_port }}
+          EXPORT_DOCKER_SUDO: ${{ inputs.docker_sudo }}
+          EXPORT_NIFI_SERVICE: ${{ inputs.nifi_service }}
+          EXPORT_GATEWAY_SERVICE: ${{ inputs.gateway_service }}
+          EXPORT_GROUP_ID: ${{ inputs.group_id }}
+          EXPORT_CREDENTIALS_JSON: ${{ secrets[inputs.credentials_secret] }}
+        run: python3 scripts/ci-export.py
+      - name: Validate selected bundle
+        env:
+          BUNDLE_PATH: ${{ steps.export.outputs.bundle_path }}
         run: |
           python3 -m unittest discover -s tests -v
-          python3 -m nifi_deploy validate bundles/node235 bundles/node237
+          python3 -m nifi_deploy validate "$BUNDLE_PATH"
       - uses: actions/upload-artifact@v4
         with:
           name: nifi-export-${{ github.run_id }}
-          path: bundles/
+          # Contents of this ONE bundle are at the artifact root.
+          path: ${{ steps.export.outputs.bundle_path }}/
           retention-days: 14
-      - name: Publish export branch
+          if-no-files-found: error
+          include-hidden-files: true
+      - name: Publish selected bundle branch
         if: inputs.publish
         env:
           GH_TOKEN: ${{ github.token }}
+          BUNDLE_NAME: ${{ steps.export.outputs.bundle_name }}
+          BUNDLE_PATH: ${{ steps.export.outputs.bundle_path }}
         run: |
           set -euo pipefail
-          if git diff --quiet -- bundles/ && [[ -z "$(git ls-files --others --exclude-standard bundles/)" ]]; then
+          # Export checksums require every packaged asset, including names ignored
+          # by repository-wide dev patterns. Stage only this generated bundle.
+          git add --force -- "$BUNDLE_PATH"
+          if git diff --cached --quiet -- "$BUNDLE_PATH"; then
             echo "No exported configuration changes"
             exit 0
           fi
-          branch="Feat/refresh-nifi-export-${GITHUB_RUN_ID}"
+          branch="Feat/refresh-nifi-export-${BUNDLE_NAME}-${GITHUB_RUN_ID}"
           git switch -c "$branch"
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add bundles/
-          git commit -m 'Feat: refresh exported NiFi configuration'
+          git commit -m "Feat: refresh NiFi export ${BUNDLE_NAME}"
           git push origin "$branch"
           echo "Open a PR: https://github.com/${GITHUB_REPOSITORY}/compare/main...${branch}"
