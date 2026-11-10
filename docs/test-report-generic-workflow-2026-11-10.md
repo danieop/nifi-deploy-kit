@@ -49,8 +49,8 @@ này được giữ để minh họa/review; không tự merge dữ liệu demo 
 
 Mỗi runner ephemeral nhận một job và tự unregister; API GitHub sau test trả
 runner count **0**. Các lần chạy sau cần trusted runner có label phù hợp online.
-Hai profile demo đã được cấu hình trong repository Secrets; không chứa credential
-trong docs, workflow inputs, bundle hoặc artifact.
+Hai profile demo đã được cấu hình trong repository Secrets; credential profile
+truy cập nguồn không được ghi vào docs, workflow inputs, bundle hoặc artifact.
 
 ## Phạm vi
 
