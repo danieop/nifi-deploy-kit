@@ -1,0 +1,61 @@
+services:
+  nifi:
+    image: ${NIFI_IMAGE:?}
+    hostname: nifi
+    entrypoint: /opt/nifi/scripts/start-http.sh
+    restart: unless-stopped
+    stop_grace_period: 120s
+    labels:
+      io.nifi-deploy-kit.managed: "true"
+    environment:
+      NIFI_JVM_HEAP_INIT: ${NIFI_JVM_HEAP_INIT:-1g}
+      NIFI_JVM_HEAP_MAX: ${NIFI_JVM_HEAP_MAX:-2g}
+    volumes:
+      - ${RUNTIME_DIRECTORY:?}/start-http.sh:/opt/nifi/scripts/start-http.sh:ro
+      - ${RUNTIME_DIRECTORY}/lib:/opt/nifi/nifi-current/ex_lib:ro
+      - ${RUNTIME_DIRECTORY}/extensions:/opt/nifi/nifi-current/nar_extensions:ro
+      - ${RUNTIME_DIRECTORY}/scripts:/opt/nifi/nifi-current/ex_scripts:ro
+      - ${RUNTIME_DIRECTORY}/data:/opt/nifi/nifi-current/ex_data
+      - nifi_conf:/opt/nifi/nifi-current/conf
+      - nifi_database:/opt/nifi/nifi-current/database_repository
+      - nifi_flowfile:/opt/nifi/nifi-current/flowfile_repository
+      - nifi_content:/opt/nifi/nifi-current/content_repository
+      - nifi_provenance:/opt/nifi/nifi-current/provenance_repository
+      - nifi_state:/opt/nifi/nifi-current/state
+      - nifi_logs:/opt/nifi/nifi-current/logs
+      - nifi_python:/opt/nifi/nifi-current/python_extensions
+  nginx:
+    image: ${NGINX_IMAGE:?}
+    restart: unless-stopped
+    depends_on:
+      - nifi
+    labels:
+      io.nifi-deploy-kit.managed: "true"
+    ports:
+      - "${BIND_ADDRESS:-127.0.0.1}:${HTTP_PORT:-9080}:8080"
+    volumes:
+      - ${RUNTIME_DIRECTORY}/nginx/nifi.conf:/etc/nginx/conf.d/default.conf:ro
+      - ${RUNTIME_DIRECTORY}/nginx/.htpasswd:/etc/nginx/.htpasswd:ro
+  registry:
+    profiles: [registry]
+    image: ${REGISTRY_IMAGE:?}
+    hostname: registry
+    restart: unless-stopped
+    environment:
+      NIFI_REGISTRY_WEB_HTTP_PORT: "9090"
+    volumes:
+      - registry_database:/opt/nifi-registry/nifi-registry-current/database
+      - registry_flow:/opt/nifi-registry/nifi-registry-current/flow_storage
+      - registry_extensions:/opt/nifi-registry/nifi-registry-current/extension_bundles
+volumes:
+  nifi_conf:
+  nifi_database:
+  nifi_flowfile:
+  nifi_content:
+  nifi_provenance:
+  nifi_state:
+  nifi_logs:
+  nifi_python:
+  registry_database:
+  registry_flow:
+  registry_extensions:
