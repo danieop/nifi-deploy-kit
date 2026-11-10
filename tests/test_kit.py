@@ -1,13 +1,9 @@
 import copy
-import json
-import tempfile
 import unittest
-from pathlib import Path
-from unittest.mock import patch
 
 from nifi_deploy.api import ApiError, Client
-from nifi_deploy.bundle import prepare_snapshot, summary, validate_bundle, write_json, digest
-from nifi_deploy.deployment import apply_parameters, apply_components, load_env, import_payload, enable_referenced_services, verify_live
+from nifi_deploy.bundle import prepare_snapshot, summary
+from nifi_deploy.deployment import apply_parameters, import_payload, enable_referenced_services, verify_live
 
 
 SNAPSHOT = {
@@ -36,29 +32,6 @@ class BundleTests(unittest.TestCase):
         self.assertEqual(counts["processGroups"], 2)
         self.assertEqual(counts["connections"], 1)
 
-    def test_checksum_mismatch_is_rejected(self):
-        with tempfile.TemporaryDirectory() as d:
-            write_json(Path(d) / "flow.json", prepare_snapshot(SNAPSHOT))
-            release = {"schemaVersion": 1, "flowFile": "flow.json", "flowSha256": digest(Path(d) / "flow.json")}
-            write_json(Path(d) / "release.json", release)
-            validate_bundle(d)
-            (Path(d) / "flow.json").write_text("{}")
-            with self.assertRaisesRegex(ValueError, "checksum"):
-                validate_bundle(d)
-
-    def test_artifact_traversal_is_rejected(self):
-        with tempfile.TemporaryDirectory() as d:
-            write_json(Path(d) / "flow.json", prepare_snapshot(SNAPSHOT))
-            write_json(Path(d) / "release.json", {"schemaVersion": 1, "flowFile": "flow.json", "flowSha256": digest(Path(d) / "flow.json"),
-                       "artifacts": [{"file": "../secret", "target": "lib", "sha256": "x"}]})
-            with self.assertRaisesRegex(ValueError, "artifact"):
-                validate_bundle(d)
-
-    def test_env_is_literal_not_shell_execution(self):
-        with tempfile.TemporaryDirectory() as d:
-            path = Path(d) / "env"
-            path.write_text('PASSWORD="a$HOME!#z"\nVALUE=$(touch /not-executed)\n')
-            self.assertEqual(load_env(path), {"PASSWORD": "a$HOME!#z", "VALUE": "$(touch /not-executed)"})
 
     def test_null_parameter_override_is_not_silently_ignored(self):
         class Fake:
@@ -69,17 +42,6 @@ class BundleTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "Null"):
             apply_parameters(Fake(), {"p": {"secret": None}})
 
-    def test_direct_service_override_keeps_properties_scoped(self):
-        class Fake:
-            payload = None
-            def get(self, path):
-                entity = {"id": "s", "revision": {"version": 2}, "component": {"name": "db", "parentGroupId": "root", "state": "DISABLED"}}
-                return {"controllerServices": [entity]} if path.startswith('/flow/') else entity
-            def request(self, method, path, payload):
-                self.payload = payload
-        client = Fake()
-        apply_components(client, "root", [{"kind": "controller-service", "name": "db", "properties": {"Password": "local-only"}}])
-        self.assertEqual(client.payload["component"], {"id": "s", "properties": {"Password": "local-only"}})
 
     def test_url_normalization(self):
         self.assertEqual(Client("http://localhost:9080/nifi/").url, "http://localhost:9080/nifi-api")
@@ -132,26 +94,6 @@ class BundleTests(unittest.TestCase):
         result = verify_live(client, "group", expected, snapshot)
         self.assertEqual(client.requests, ["DISABLED"])
         self.assertEqual(len(result["typeMismatches"]), 1)
-
-    def test_export_uses_only_get(self):
-        from nifi_deploy.bundle import export_bundle
-        class Fake:
-            calls = []
-            def root_id(self):
-                return "root"
-            def get(self, path):
-                self.calls.append(path)
-                if path == "/flow/about":
-                    return {"about": {"version": "2.12.0"}}
-                if path.startswith("/process-groups/"):
-                    self.assertion = "includeComponentState=false" in path
-                    return SNAPSHOT
-                return {"registries": []}
-        client = Fake()
-        with tempfile.TemporaryDirectory() as d:
-            export_bundle(client, d, "test")
-            self.assertTrue(client.assertion)
-            validate_bundle(d)
 
 
 if __name__ == "__main__":

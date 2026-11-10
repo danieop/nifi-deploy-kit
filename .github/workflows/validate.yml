@@ -16,18 +16,24 @@ jobs:
       - name: Unit tests
         run: python3 -m unittest discover -s tests -v
       - name: Shell syntax
-        run: bash -n export.sh deploy.sh && sh -n infrastructure/start-http.sh
+        run: bash -n export.sh deploy.sh
       - name: Validate exported bundles
         run: |
           shopt -s nullglob
-          bundles=(bundles/*/config.json bundles/*/release.json)
+          bundles=(bundles/*/config.json)
           for manifest in "${bundles[@]}"; do
             python3 -m nifi_deploy validate "$(dirname "$manifest")"
           done
-      - name: Validate Compose
-        env:
-          RUNTIME_DIRECTORY: /tmp/nifi-validation
-          NIFI_IMAGE: apache/nifi:2.12.0
-          NGINX_IMAGE: nginx:1.27-alpine
-          REGISTRY_IMAGE: apache/nifi-registry:2.12.0
-        run: docker compose -f infrastructure/compose.yml --profile registry config --quiet
+      - name: Validate Compose models
+        run: |
+          python3 - <<'PYTHON'
+          import json, subprocess, tempfile
+          from pathlib import Path
+          from nifi_deploy.portable_deployment import literal_compose
+          for path in Path('bundles').glob('*/config.json'):
+              config = json.loads(path.read_text())
+              with tempfile.TemporaryDirectory() as directory:
+                  compose = Path(directory) / 'compose.json'
+                  compose.write_text(json.dumps(literal_compose(config['docker']['compose'])))
+                  subprocess.run(['docker', 'compose', '-p', 'validate-' + config['name'], '-f', str(compose), 'config', '--quiet'], check=True)
+          PYTHON

@@ -51,6 +51,3 @@ API-key/credential are masked (username keys and empty values excluded). Source
 htpasswd and certificate/private-key files are not copied. Native sensitivity
 is determined from exported descriptors plus GET presence checks on affected
 components. No plaintext recovery and no arbitrary script/URL/binary scrubber.
-
-The old infrastructure template and legacy flags remain only for schema 1
-compatibility. Schema 2 deployment uses the captured `docker.compose` model.

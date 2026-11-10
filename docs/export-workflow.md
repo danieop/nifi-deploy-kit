@@ -128,10 +128,6 @@ nano local/export-RUN_ID/config.json
 ./deploy.sh --config local/export-RUN_ID/config.json
 ```
 
-Artifact của workflow v0.2 cũ chứa nhiều bundle trong các thư mục node235/node237;
-đừng nhầm đường dẫn với artifact root của workflow mới. Format flow/config vẫn
-schema 2; deploy interface giữ nguyên `--config`.
-
 Nếu bật publish và bundle khác Git, CI tạo nhánh
 `Feat/refresh-nifi-export-<bundle_name>-<run_id>`, chỉ stage bundle đó. Mở PR theo
 compare URL trong log và merge sau review. Main, release tags, config local đã
@@ -144,12 +140,12 @@ chỉ tắt nhánh Git, **không làm artifact thành private**. Native secrets 
 nhưng script/URL/ordinary text/binary có thể chứa thông tin nội bộ; chỉ export nội
 dung được phép chia sẻ lên repo này, hoặc dùng một repo private phù hợp.
 
-## 5. Ghi chú nâng từ v0.2
+## Credential và runner
 
-Không còn input `source=both`: muốn export hai nguồn thì chạy hai lần.
-Không còn đọc `sources/hosts.json`, `sources/known_hosts`, variables SOURCE_235_URL /
-SOURCE_237_URL hoặc các Secret NIFI_SOURCE_* của workflow cũ. Những Secret cũ
-không bị tự xóa; có thể giữ cho công cụ khác, nhưng không điều khiển workflow mới.
-Hai bundle node235/node237 có sẵn chỉ là dữ liệu mẫu đã export. Credential profile
-mới không được đưa vào artifact/bundle. Temp files bị xóa cả khi export lỗi; các
-field giải mã được đăng ký mask trong log trước khi sử dụng.
+Credential profile chỉ dùng truy cập nguồn, không được đưa vào bundle. Temp
+files có quyền 600 và được xóa cả khi export lỗi; các field đã giải mã được mask
+trong Actions log. Credential cho NiFi đích được admin cấp trong config.json.
+
+Runner cần online và truy cập được nguồn bằng SSH/API. Workflow không cài runner
+trên VM nguồn. Chạy nhiều nguồn bằng nhiều lần dispatch với input/profile tương
+ứng; mỗi artifact chỉ chứa một bundle.

@@ -1,8 +1,0 @@
-{
-  "ParamRabbitMQ": {
-    "app-scrapcommand-host": "rabbitmq.customer.internal",
-    "app-scrapcommand-port": "5672",
-    "app-scrapcommand-username": "nifi",
-    "app-scrapcommand-pass": "CHANGE_ME"
-  }
-}
