@@ -1,0 +1,89 @@
+{
+  "artifacts": [
+    {
+      "file": "artifacts/extensions/nifi-icc-processor-nar-1.0.3.1.nar",
+      "sha256": "ebf31fa1c95ab94f76ea7821e4e122d86cfe29ec66969aaf5ffb9d302e45a18c",
+      "target": "extensions"
+    },
+    {
+      "file": "artifacts/extensions/nifi-service-api-nar-1.0.3.1.nar",
+      "sha256": "1c88c46b8d6f6e1518c6d63204e09f4408e068a99fb7511485eeb2b01764022b",
+      "target": "extensions"
+    },
+    {
+      "file": "artifacts/extensions/nifi-service-nar-1.0.3.1.nar",
+      "sha256": "3c1a4eca805ba5d00e14830814671d17b4b5eb0462eccdcd0c85fecc60ef06cc",
+      "target": "extensions"
+    },
+    {
+      "file": "artifacts/lib/jsoup-1.18.3.jar",
+      "sha256": "5be1ccd3228ae5fd6eed1bd6d827bac2bc65b91c20e9957d16ea65f739f15302",
+      "target": "lib"
+    }
+  ],
+  "bundles": [
+    {
+      "artifact": "nifi-icc-processor-nar",
+      "group": "icc.nifi",
+      "version": "1.0.3.1"
+    },
+    {
+      "artifact": "nifi-amqp-nar",
+      "group": "org.apache.nifi",
+      "version": "2.12.0"
+    },
+    {
+      "artifact": "nifi-elasticsearch-client-service-nar",
+      "group": "org.apache.nifi",
+      "version": "2.12.0"
+    },
+    {
+      "artifact": "nifi-elasticsearch-restapi-nar",
+      "group": "org.apache.nifi",
+      "version": "2.12.0"
+    },
+    {
+      "artifact": "nifi-groovyx-nar",
+      "group": "org.apache.nifi",
+      "version": "2.12.0"
+    },
+    {
+      "artifact": "nifi-jolt-nar",
+      "group": "org.apache.nifi",
+      "version": "2.12.0"
+    },
+    {
+      "artifact": "nifi-scripting-nar",
+      "group": "org.apache.nifi",
+      "version": "2.12.0"
+    },
+    {
+      "artifact": "nifi-standard-nar",
+      "group": "org.apache.nifi",
+      "version": "2.12.0"
+    },
+    {
+      "artifact": "nifi-update-attribute-nar",
+      "group": "org.apache.nifi",
+      "version": "2.12.0"
+    }
+  ],
+  "counts": {
+    "connections": 1787,
+    "controllerServices": 3,
+    "inputPorts": 222,
+    "outputPorts": 254,
+    "parameterContexts": 1,
+    "processGroups": 217,
+    "processors": 1070
+  },
+  "flowFile": "flow.json",
+  "flowSha256": "4d1432c390e4920358edfc651bb9c34b557ad5681651bf957ce25127f2ad041d",
+  "name": "node237",
+  "nginxImage": "nginx:1.27-alpine",
+  "nifiImage": "apache/nifi:2.12.0",
+  "nifiVersion": "2.12.0",
+  "registryEnabled": false,
+  "registryImage": "apache/nifi-registry:2.12.0",
+  "schemaVersion": 1
+}
