@@ -41,6 +41,10 @@ trong báo cáo. Các demo v0.1 và bản thử trung gian đã dừng, volumes 
   parameters, checksum/path traversal, literal env/dollar handling, source-ID
   mapping, duplicated versioned IDs, mount ordering, atomic export cleanup,
   Docker change/queue guards và legacy compatibility.
+- UI Basic Auth: cả hai UI trả 401 khi chưa đăng nhập, 200 khi dùng credentials
+  local. Hai Compose JSON từ bundle đều qua `docker compose config --quiet`.
+- Đọc nguồn lần cuối bằng GET: runningCount 145 / 1.254, invalidCount 1 / 3,
+  tương ứng node235 / node237.
 - Fresh import cả hai flow bằng Compose thực tế được export, image pin theo digest.
 - Đối chiếu hierarchy, types/bundles và các property không-sensitive với config.
   API che cả parameter references sensitive nên không suy diễn plaintext từ GET.
