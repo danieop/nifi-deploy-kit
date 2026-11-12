@@ -107,6 +107,12 @@ cấu hình đã điền và ghi `report.json`/deployment state trong runtime di
 Gateway/Docker/localFiles còn placeholder sẽ bị từ chối trước khi tạo container.
 Placeholder NiFi được bỏ qua khi staged, được liệt kê trong `unresolvedSecrets`.
 
+Script đợi API NiFi sẵn sàng, retry lỗi kết nối/reset trong bước GET readiness,
+rồi đợi component validate xong trước khi ghi report. Tiến độ chờ được in ra
+Terminal; `VALIDATING` không được tính là cấu hình hợp lệ. Timeout mặc định là
+600 giây cho mỗi bước chờ; máy khởi động chậm có thể thêm `--timeout 1200`.
+Request import/replace không tự retry khi mất kết nối.
+
 Mở `deployment.apiUrl`, đăng nhập bằng gatewayAuth. Đọc report, xử lý validation,
 kiểm tra backend trước khi chạy nghiệp vụ. Hạ tầng/import thành công không tự
 chứng minh flow chạy nghiệp vụ đúng.
@@ -125,6 +131,14 @@ Dùng lại config/runtime directory để giữ group ID và volumes. Parameter
 đã sửa được áp vào component stopped/disabled; giá trị không đổi được bỏ qua.
 Khi nhận bundle mới, chuyển các giá trị riêng của khách sang config mới trước khi
 triển khai; export không tự cập nhật file local hay NiFi đang chạy.
+
+Không chỉ thay `flow.json` rồi dùng nguyên metadata cũ: `config.json` phải có
+`flow.sha256`, `flow.counts`, `flow.bundles` khớp flow mới. Nếu chỉ đổi vị trí,
+đường nối hoặc trạng thái enabled/disabled và các override không đổi, thay flow
+và cập nhật phần `flow` từ config export mới; giữ cấu hình máy đích/secret cũ.
+Nếu property, parameter hoặc component thay đổi, đối chiếu thêm `components`
+và `parameters`: override cũ có thể ghi ngược lại giá trị vừa sửa trên nguồn.
+Giữ nguyên project/runtime directory để redeploy đúng instance đang quản lý.
 
 Thay flow, Docker model hoặc packaged assets: dừng nguồn dữ liệu vào **máy đích**,
 stop/drain ứng dụng rồi chạy:

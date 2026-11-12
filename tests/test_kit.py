@@ -1,9 +1,11 @@
 import copy
+import io
 import unittest
+from unittest.mock import patch
 
 from nifi_deploy.api import ApiError, Client
 from nifi_deploy.bundle import prepare_snapshot, summary
-from nifi_deploy.deployment import apply_parameters, import_payload, enable_referenced_services, verify_live
+from nifi_deploy.deployment import apply_parameters, import_payload, enable_referenced_services, verify_live, wait_for_validation
 
 
 SNAPSHOT = {
@@ -15,6 +17,32 @@ SNAPSHOT = {
     "parameterContexts": {"p": {"name": "p", "parameters": [
         {"name": "password", "sensitive": True, "value": "private"},
         {"name": "host", "sensitive": False, "value": "example.internal"}]}}}
+
+
+class ValidationClient:
+    def __init__(self, states, processor_state='STOPPED', service_states=None):
+        self.states = states
+        self.processor_state = processor_state
+        self.service_states = service_states
+        self.reads = 0
+
+    def get(self, path):
+        if path.endswith('/status'):
+            return {'processGroupStatus': {'aggregateSnapshot': {'flowFilesQueued': 0}}}
+        if path.endswith('/controller-services'):
+            if self.service_states is None:
+                return {'controllerServices': []}
+            state = self.service_states[min(self.reads - 1, len(self.service_states) - 1)]
+            return {'controllerServices': [{'id': 'service', 'component': {
+                'parentGroupId': 'group', 'validationStatus': state, 'state': 'DISABLED'}}]}
+        state = self.states[min(self.reads, len(self.states) - 1)]
+        self.reads += 1
+        return {'processGroupFlow': {'flow': {'processors': [{'id': 'processor', 'component': {
+            'type': 'example.Processor', 'state': self.processor_state, 'validationStatus': state}}]}}}
+
+
+VALIDATION_COUNTS = {'processors': 1, 'connections': 0, 'inputPorts': 0, 'outputPorts': 0,
+                     'controllerServices': 0, 'processGroups': 1}
 
 
 class BundleTests(unittest.TestCase):
@@ -94,6 +122,44 @@ class BundleTests(unittest.TestCase):
         result = verify_live(client, "group", expected, snapshot)
         self.assertEqual(client.requests, ["DISABLED"])
         self.assertEqual(len(result["typeMismatches"]), 1)
+
+    def test_validation_wait_catches_late_invalid_result(self):
+        client = ValidationClient(['VALIDATING', 'VALID', 'INVALID', 'INVALID'])
+        with patch('nifi_deploy.deployment.time.sleep'), patch('sys.stderr', io.StringIO()):
+            result = wait_for_validation(client, 'group', VALIDATION_COUNTS)
+        self.assertEqual(client.reads, 4)
+        self.assertEqual(len(result['invalidProcessors']), 1)
+        self.assertEqual(result['validatingComponents'], [])
+
+    def test_validation_wait_includes_owned_controller_services(self):
+        client = ValidationClient(['VALID'], service_states=['VALIDATING', 'VALID', 'VALID'])
+        with patch('nifi_deploy.deployment.time.sleep'), patch('sys.stderr', io.StringIO()):
+            result = wait_for_validation(client, 'group', {**VALIDATION_COUNTS, 'controllerServices': 1})
+        self.assertEqual(client.reads, 3)
+        self.assertEqual(result['validatingComponents'], [])
+
+    def test_pending_or_unknown_validation_cannot_be_reported_as_ready(self):
+        for state in ('VALIDATING', None):
+            with self.subTest(state=state):
+                result = verify_live(ValidationClient([state]), 'group', VALIDATION_COUNTS)
+                self.assertEqual(len(result['validatingComponents']), 1)
+
+    def test_disabled_processors_do_not_block_validation(self):
+        client = ValidationClient(['VALIDATING'], processor_state='DISABLED')
+        with patch('nifi_deploy.deployment.time.sleep'):
+            result = wait_for_validation(client, 'group', VALIDATION_COUNTS)
+        self.assertEqual(result['validatingComponents'], [])
+        self.assertEqual(client.reads, 2)
+
+    def test_pending_validation_times_out_instead_of_returning_success(self):
+        client = ValidationClient(['VALIDATING'])
+        clock = [0.0]
+        with patch('nifi_deploy.deployment.time.monotonic', side_effect=lambda: clock[0]), \
+             patch('nifi_deploy.deployment.time.sleep', side_effect=lambda seconds: clock.__setitem__(0, clock[0] + seconds)), \
+             patch('sys.stderr', io.StringIO()):
+            with self.assertRaisesRegex(ApiError, 'validation did not finish'):
+                wait_for_validation(client, 'group', VALIDATION_COUNTS, seconds=2)
+        self.assertEqual(clock[0], 2)
 
 
 if __name__ == "__main__":

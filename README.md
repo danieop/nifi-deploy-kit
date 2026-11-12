@@ -79,6 +79,11 @@ then run the same command with `--start`. Redeploy reuses group IDs and volumes;
 flow/Docker/asset replacement requires `--overwrite-config` and a stopped,
 drained target. Keep runtime state and named volumes.
 
+Deployment waits for the NiFi API and settled component validation before
+reporting readiness. Startup GET checks retry transient connection failures;
+import/replace writes are not automatically replayed. Waiting progress goes to
+stderr; `--timeout` defaults to 600 seconds for each wait stage.
+
 [Hướng dẫn admin](docs/admin-vi.md) · [Config reference](docs/config-reference.md)
 
 ## Scope

@@ -1,4 +1,5 @@
 import subprocess
+import sys
 import time
 
 from .api import ApiError, api_path
@@ -102,6 +103,7 @@ def verify_live(client, group_id, expected, snapshot=None):
               "inputPorts": 0, "outputPorts": 0}
     invalid = []
     mismatches = []
+    validating = []
     running = 0
     def visit(gid, source_group=None):
         nonlocal running
@@ -123,10 +125,16 @@ def verify_live(client, group_id, expected, snapshot=None):
             running += comp.get("state") == "RUNNING"
             if comp.get("validationStatus") == "INVALID" and comp.get("state") != "DISABLED":
                 invalid.append({"id": p["id"], "type": comp.get("type"), "name": comp.get("name")})
+            elif comp.get("validationStatus") not in ("VALID", "INVALID") and comp.get("state") != "DISABLED":
+                validating.append({"id": p["id"], "kind": "processor", "name": comp.get("name")})
         # Endpoint includes ancestor services: count only services owned by this group.
         services = client.get("/flow/process-groups/" + api_path(gid) + "/controller-services").get("controllerServices", [])
         owned = [s for s in services if s.get("component", {}).get("parentGroupId") == gid]
         counts["controllerServices"] += len(owned)
+        for service in owned:
+            comp = service["component"]
+            if comp.get("validationStatus") == "VALIDATING" and not comp.get("extensionMissing"):
+                validating.append({"id": service["id"], "kind": "controller-service", "name": comp.get("name")})
         for service in owned if source_group else []:
             comp = service["component"]
             original = select_source(comp, source_group.get("controllerServices", []))
@@ -146,4 +154,29 @@ def verify_live(client, group_id, expected, snapshot=None):
     if any(counts[k] != expected.get(k, 0) for k in counts):
         raise RuntimeError("Imported component counts differ from the exported bundle")
     return {"counts": counts, "runningProcessors": running, "invalidProcessors": invalid, "typeMismatches": mismatches,
+            "validatingComponents": validating,
             "queue": status(client, group_id).get("flowFilesQueued", 0)}
+
+
+def wait_for_validation(client, group_id, expected, snapshot=None, seconds=600):
+    """Wait for two settled validation readings; never treat VALIDATING as valid."""
+    deadline = time.monotonic() + seconds
+    settled = None
+    waiting = False
+    while True:
+        result = verify_live(client, group_id, expected, snapshot)
+        signature = (tuple(sorted(p['id'] for p in result['invalidProcessors'])),
+                     tuple(sorted(p['id'] for p in result['typeMismatches'])))
+        if not result['validatingComponents']:
+            if settled == signature:
+                return result
+            settled = signature
+        else:
+            settled = None
+            if not waiting:
+                print("Waiting for NiFi component validation...", file=sys.stderr, flush=True)
+                waiting = True
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise ApiError("NiFi component validation did not finish before the timeout; inspect the target UI")
+        time.sleep(min(1, remaining))
