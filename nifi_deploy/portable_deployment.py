@@ -11,7 +11,7 @@ from urllib.parse import urlparse
 from .api import Client, api_path
 from .bundle import digest, read_json, write_json
 from .configuration import component_key, configured_snapshot, safe_path, unresolved, validate_config
-from .deployment import (enable_referenced_services, import_payload, run, select_source, status, verify_live)
+from .deployment import (enable_referenced_services, import_payload, run, select_source, status, wait_for_validation)
 from .docker_export import SECRET
 
 
@@ -236,12 +236,12 @@ def deploy_config(config_file, overwrite=False, start=False, timeout=600):
         write_json(state_path, state, private=True)
     if not fresh and not overwrite and state.get('settingsSha256') != settings_hash:
         apply_live_config(client, group_id, source, config)
-    check = verify_live(client, group_id, config['flow']['counts'], source)
+    check = wait_for_validation(client, group_id, config['flow']['counts'], source, timeout)
     if start:
         if check['typeMismatches']:
             raise ValueError('Target component types/bundles differ from the source')
         enable_referenced_services(client, group_id)
-        check = verify_live(client, group_id, config['flow']['counts'], source)
+        check = wait_for_validation(client, group_id, config['flow']['counts'], source, timeout)
         if check['invalidProcessors']:
             raise ValueError('Flow has invalid processors; inspect the target UI before starting')
         client.request('PUT', '/flow/process-groups/' + group_id, {'id': group_id, 'state': 'RUNNING'})

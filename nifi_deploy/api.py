@@ -1,6 +1,8 @@
 import base64
+import http.client
 import json
 import ssl
+import sys
 import time
 import urllib.error
 import urllib.parse
@@ -27,35 +29,44 @@ class Client:
             handlers.append(urllib.request.HTTPSHandler(context=ssl.create_default_context(cafile=ca_file)))
         self.opener = urllib.request.build_opener(*handlers)
 
-    def request(self, method, path, payload=None):
+    def request(self, method, path, payload=None, *, timeout=None):
         body = json.dumps(payload).encode() if payload is not None else None
         headers = dict(self.headers)
         if body is not None:
             headers["Content-Type"] = "application/json"
         request = urllib.request.Request(self.url + path, data=body, headers=headers, method=method)
         try:
-            with self.opener.open(request, timeout=self.timeout) as response:
+            with self.opener.open(request, timeout=self.timeout if timeout is None else timeout) as response:
                 raw = response.read()
                 return json.loads(raw) if raw else {}
         except urllib.error.HTTPError as error:
             # Error bodies can contain submitted properties. Do not log them.
             raise ApiError(f"NiFi {method} {path.split('?')[0]}: HTTP {error.code}") from None
-        except (urllib.error.URLError, TimeoutError) as error:
+        except (urllib.error.URLError, TimeoutError, ConnectionError, http.client.HTTPException) as error:
             raise ApiError(f"NiFi {method} {path.split('?')[0]}: connection unavailable") from error
 
-    def get(self, path):
-        return self.request("GET", path)
+    def get(self, path, *, timeout=None):
+        return self.request("GET", path, timeout=timeout)
 
     def root_id(self):
         return self.get("/flow/process-groups/root")["processGroupFlow"]["id"]
 
     def wait_ready(self, seconds=600):
         deadline = time.monotonic() + seconds
-        while time.monotonic() < deadline:
+        waiting = False
+        while (remaining := deadline - time.monotonic()) > 0:
             try:
-                return self.get("/flow/about")["about"]
-            except ApiError:
-                time.sleep(3)
+                about = self.get("/flow/about", timeout=min(self.timeout, remaining))["about"]
+                if isinstance(about, dict) and about.get("version"):
+                    if waiting:
+                        print("NiFi API is ready.", file=sys.stderr, flush=True)
+                    return about
+            except (ApiError, json.JSONDecodeError, KeyError, TypeError):
+                pass
+            if not waiting:
+                print("Waiting for NiFi API readiness...", file=sys.stderr, flush=True)
+                waiting = True
+            time.sleep(max(0, min(3, deadline - time.monotonic())))
         raise ApiError("NiFi did not become ready before the timeout")
 
     def poll(self, path, seconds=600):

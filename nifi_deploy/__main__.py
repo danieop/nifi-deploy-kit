@@ -57,8 +57,9 @@ def main():
                       for p in args.bundles]
         else:
             result = deploy_config(args.config, args.overwrite_config, args.start, args.timeout)
-            result = {**{k: v for k, v in result.items() if k not in ("invalidProcessors", "typeMismatches")},
+            result = {**{k: v for k, v in result.items() if k not in ("invalidProcessors", "typeMismatches", "validatingComponents")},
                       "invalidProcessorCount": len(result["invalidProcessors"]),
+                      "validatingComponentCount": len(result["validatingComponents"]),
                       "typeMismatchCount": len(result["typeMismatches"])}
         print(json.dumps(result, ensure_ascii=False, indent=2))
     except (ValueError, RuntimeError, OSError, KeyError) as error:
